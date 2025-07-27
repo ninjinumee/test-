@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>顔認証比較デモ (DeepFace vs ONNX ArcFace)</title>
+    <style>
+        .comparison { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr 1fr; 
+            gap: 20px; 
+            margin-top: 20px; 
+        }
+        .method { 
+            border: 1px solid #ccc; 
+            padding: 15px; 
+            border-radius: 5px; 
+            flex: 1; 
+        }
+        .method h3 { 
+            margin-top: 0; 
+        }
+        .same { 
+            color: green; 
+            font-weight: bold; 
+        }
+        .different { 
+            color: red; 
+            font-weight: bold; 
+        }
+        .model-comparison-section {
+            margin-top: 30px;
+            padding: 20px;
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            background-color: #f8f9fa;
+        }
+        .ensemble-summary {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 8px;
+        }
+        .models-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .model-card {
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: white;
+        }
+        .model-card h4 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .model-description {
+            font-style: italic;
+            color: #6c757d;
+            margin-bottom: 10px;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .search-results {
+            margin-top: 30px;
+            padding: 20px;
+            border: 2px solid #28a745;
+            border-radius: 10px;
+            background-color: #f8fff9;
+        }
+        .result-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background-color: white;
+        }
+        .result-item.match {
+            border-color: #28a745;
+            background-color: #f8fff9;
+        }
+        .result-image {
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 5px;
+            margin-right: 15px;
+        }
+        .result-details {
+            flex: 1;
+        }
+        .similarity-score {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .similarity-score.high {
+            color: #28a745;
+        }
+        .similarity-score.medium {
+            color: #ffc107;
+        }
+        .similarity-score.low {
+            color: #6c757d;
+        }
+        .rank-badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .rank-badge.top3 {
+            background: linear-gradient(45deg, #ffd700, #ffb300);
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔥 ArcFaceモデル比較デモ (DeepFace + マルチONNX)</h1>
+    
+    
+    <!-- 1対N比較 -->
+    <div style="border: 1px solid #007bff; padding: 20px; margin-bottom: 20px; border-radius: 8px; background-color: #f8f9fa;">
+        <h2>🔍 1対N 顔検索</h2>
+        <p style="color: #6c757d; margin-bottom: 15px;">1つの画像とフォルダ内の全ての画像を比較します</p>
+        <form id="compare-folder-form" enctype="multipart/form-data">
+            <label>検索したい顔画像: <input type="file" id="query-image" accept="image/*" required></label><br><br>
+            <div style="margin-bottom: 15px;">
+                <label>比較対象を選択:</label><br>
+                <input type="radio" id="select-files" name="selection-type" value="files" checked>
+                <label for="select-files">個別ファイル選択 (複数選択可)</label><br>
+                <input type="radio" id="select-folder" name="selection-type" value="folder">
+                <label for="select-folder">フォルダ選択 (フォルダ内の全画像)</label>
+            </div>
+            <div id="file-input-container">
+                <label>比較対象画像: <input type="file" id="folder-images" accept="image/*" multiple required></label>
+            </div>
+            <div id="folder-input-container" style="display: none;">
+                <label>比較対象フォルダ: <input type="file" id="folder-directory" webkitdirectory multiple accept="image/*"></label>
+                <p style="color: #6c757d; font-size: 0.9em; margin-top: 5px;">
+                    ※ フォルダを選択するとフォルダ内の全ての画像ファイルが選択されます
+                </p>
+            </div>
+            <br>
+            <button type="submit" id="compare-btn">検索開始</button>
+            <button type="button" id="cancel-btn" style="display: none; margin-left: 10px;">キャンセル</button>
+        </form>
+        
+        <!-- 進捗表示 -->
+        <div id="progress-container" style="display: none; margin-top: 20px;">
+            <div style="background-color: #e9ecef; border-radius: 4px; overflow: hidden;">
+                <div id="progress-bar" style="background-color: #007bff; height: 20px; width: 0%; transition: width 0.3s;"></div>
+            </div>
+            <p id="progress-text" style="margin-top: 10px; text-align: center;">処理中...</p>
+        </div>
+    </div>
+    
+    <!-- 検索結果表示エリア -->
+    <div id="search-results" style="display: none;">
+    </div>
+    
+    
+    <script>
+        // ラジオボタンの切り替え処理
+        document.querySelectorAll('input[name="selection-type"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const fileContainer = document.getElementById('file-input-container');
+                const folderContainer = document.getElementById('folder-input-container');
+                
+                if (this.value === 'files') {
+                    fileContainer.style.display = 'block';
+                    folderContainer.style.display = 'none';
+                    document.getElementById('folder-images').required = true;
+                    document.getElementById('folder-directory').required = false;
+                } else {
+                    fileContainer.style.display = 'none';
+                    folderContainer.style.display = 'block';
+                    document.getElementById('folder-images').required = false;
+                    document.getElementById('folder-directory').required = true;
+                }
+            });
+        });
+
+        document.getElementById('compare-folder-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const queryImage = document.getElementById('query-image').files[0];
+            const selectionType = document.querySelector('input[name="selection-type"]:checked').value;
+            
+            let folderImages;
+            if (selectionType === 'files') {
+                folderImages = document.getElementById('folder-images').files;
+            } else {
+                folderImages = document.getElementById('folder-directory').files;
+            }
+            
+            const compareBtn = document.getElementById('compare-btn');
+            const cancelBtn = document.getElementById('cancel-btn');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const searchResults = document.getElementById('search-results');
+            
+            if (!queryImage || folderImages.length === 0) {
+                alert('検索画像と比較対象画像を選択してください');
+                return;
+            }
+            
+            // 画像ファイルのみをフィルタリング
+            const imageFiles = Array.from(folderImages).filter(file => 
+                file.type.startsWith('image/') || 
+                /\.(jpg|jpeg|png|gif|bmp|webp|avif)$/i.test(file.name)
+            );
+            
+            if (imageFiles.length === 0) {
+                alert('画像ファイルが見つかりません');
+                return;
+            }
+            
+            // UIをローディング状態に
+            compareBtn.disabled = true;
+            compareBtn.textContent = '処理中...';
+            cancelBtn.style.display = 'inline-block';
+            progressContainer.style.display = 'block';
+            searchResults.style.display = 'none';
+            progressBar.style.width = '0%';
+            progressText.textContent = `処理中... 画像ファイル数: ${imageFiles.length}`;
+            
+            try {
+                const formData = new FormData();
+                formData.append('query_image', queryImage);
+                
+                // フィルタリングされた画像ファイルのみを送信
+                for (let i = 0; i < imageFiles.length; i++) {
+                    formData.append('folder_images', imageFiles[i]);
+                }
+                
+                // 大量ファイル用のタイムアウト設定
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30 * 60 * 1000); // 30分タイムアウト
+                
+                console.log(`🚀 リクエスト送信: ${imageFiles.length}ファイル`);
+                console.log(`📊 推定データサイズ: ${(imageFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(1)}MB`);
+                
+                const response = await fetch('/compare_folder', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                console.log(`📨 レスポンス受信: status=${response.status}, ok=${response.ok}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`❌ HTTPエラー ${response.status}:`, errorText);
+                    throw new Error(`HTTPエラー ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+                
+                const result = await response.json();
+                console.log(`✅ 処理完了: ${result.total_comparisons || 0}件処理`);
+                
+                displaySearchResults(result);
+                progressContainer.style.display = 'none';
+                
+            } catch (error) {
+                alert('エラー: ' + error.message);
+            } finally {
+                // UIを元の状態に戻す
+                compareBtn.disabled = false;
+                compareBtn.textContent = '検索開始';
+                cancelBtn.style.display = 'none';
+                progressContainer.style.display = 'none';
+            }
+        });
+        
+        function displaySearchResults(data) {
+            const searchResults = document.getElementById('search-results');
+            
+            const getSimilarityClass = (similarity) => {
+                if (similarity > 0.7) return 'high';
+                if (similarity > 0.45) return 'medium';
+                return 'low';
+            };
+            
+            let html = `
+                <div class="search-results">
+                    <h2>🔍 顔検索結果</h2>
+                    <div style="margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px;">
+                        <p><strong>検索画像:</strong> ${data.query_image}</p>
+                        <p><strong>比較した画像数:</strong> ${data.total_comparisons.toLocaleString()}</p>
+                        <p><strong>成功した比較:</strong> ${data.successful_comparisons.toLocaleString()}</p>
+                        <p><strong>マッチした画像:</strong> ${data.matches_found.toLocaleString()}</p>
+                        <p><strong>使用閾値:</strong> ${data.processing_summary.threshold_used}</p>
+                        <p><strong>使用モデル:</strong> ${data.processing_summary.available_models.map(key => data.processing_summary.model_descriptions[key] || key).join(', ')}</p>
+                        ${data.total_results > 0 ? `<p><strong>表示結果:</strong> 全 ${data.total_results.toLocaleString()} 件表示</p>` : ''}
+                        ${data.processing_summary.total_processing_time ? `<p><strong>総処理時間:</strong> ${(data.processing_summary.total_processing_time / 1000).toFixed(1)} 秒</p>` : ''}
+                        ${data.processing_summary.files_per_second ? `<p><strong>処理速度:</strong> ${data.processing_summary.files_per_second.toFixed(1)} ファイル/秒</p>` : ''}
+                        ${data.processing_summary.multiprocessing_used ? `<p style="color: #28a745;"><strong>🚀 高度最適化:</strong> マルチプロセシング使用 (${data.processing_summary.max_workers_used}並列)</p>` : ''}
+                        ${data.total_comparisons > 1000 ? `<p style="color: #dc3545;"><strong>⚠️ 大量処理:</strong> ${data.total_comparisons.toLocaleString()}ファイルの処理が完了しました</p>` : ''}
+                    </div>
+                    
+                    <h3>🏆 結果 (類似度上位順)</h3>
+            `;
+            
+            data.results.forEach((result, index) => {
+                const similarityClass = getSimilarityClass(result.best_similarity);
+                const matchClass = result.is_match ? 'match' : '';
+                
+                html += `
+                    <div class="result-item ${matchClass}">
+                        ${result.image_path ? `<img src="${result.image_path}" alt="${result.filename}" class="result-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="result-image" style="background-color: #f8f9fa; display: none; align-items: center; justify-content: center; color: #6c757d;">画像読込エラー<br><small>${result.image_path}</small></div>` : '<div class="result-image" style="background-color: #f8f9fa; display: flex; align-items: center; justify-content: center;">画像なし</div>'}
+                        <div class="result-details">
+                            <h4>
+                                <span class="rank-badge ${(result.rank || (index + 1)) <= 3 ? 'top3' : ''}">
+                                    ${(result.rank || (index + 1)) <= 3 ? '🏆' : '📍'} 第${result.rank || (index + 1)}位
+                                </span>
+                                ${result.original_filename || result.filename}
+                            </h4>
+                            <div class="similarity-score ${similarityClass}">
+                                類似度: ${(result.best_similarity * 100).toFixed(1)}%
+                            </div>
+                            <p><strong>最高評価モデル:</strong> ${result.best_model}</p>
+                            <p><strong>判定:</strong> ${result.is_match ? '✅ マッチ' : '❌ 非マッチ'}</p>
+                            ${result.error ? `<p class="error">エラー: ${result.error}</p>` : ''}
+                            
+                            <details style="margin-top: 10px;">
+                                <summary>詳細結果</summary>
+                                <div style="margin-top: 10px;">
+                                    ${Object.entries(result.model_results).map(([model_key, model_result]) => `
+                                        <div style="margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+                                            <strong>${model_result.model_name}:</strong><br>
+                                            類似度: ${(model_result.similarity * 100).toFixed(1)}%<br>
+                                            信頼度: ${(model_result.confidence * 100).toFixed(1)}%<br>
+                                            判定: ${model_result.is_same ? '同一人物' : '別人'}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            searchResults.innerHTML = html;
+            searchResults.style.display = 'block';
+            
+            // 結果エリアまでスクロール
+            searchResults.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html> 
