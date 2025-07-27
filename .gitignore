@@ -1,0 +1,9 @@
+venv/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+*.avif
+static/uploads/
