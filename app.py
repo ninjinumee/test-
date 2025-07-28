@@ -124,10 +124,10 @@ try:
 except ImportError:
     print("警告: pillow-avif-plugin がインストールされていません。AVIF形式はサポートされません。")
 
-# Buffalo_l用のカスタムDeepFaceモデルクラス
-class Buffalo_l_Model:
+# AuraFace用のカスタムDeepFaceモデルクラス
+class AuraFace_Model:
     def __init__(self, session, model_info):
-        self.model_name = "Buffalo_l"
+        self.model_name = "AuraFace"
         self.input_shape = (112, 112, 3)
         self.output_shape = 512
         self.session = session
@@ -136,7 +136,7 @@ class Buffalo_l_Model:
     def predict(self, img_array):
         """DeepFace互換の予測関数"""
         try:
-            # 入力を正規化 (DeepFaceは0-255, Buffalo_lは-1~1)
+            # 入力を正規化 (DeepFaceは0-255, AuraFaceは-1~1)
             if img_array.max() > 1.0:
                 img_array = (img_array - 127.5) / 128.0
             
@@ -157,20 +157,20 @@ class Buffalo_l_Model:
             return embedding
             
         except Exception as e:
-            print(f"Buffalo_l予測エラー: {e}")
+            print(f"AuraFace予測エラー: {e}")
             raise e
 
-# DeepFaceにBuffalo_lモデルを登録する関数
-def register_buffalo_l_to_deepface(session, model_info):
-    """Buffalo_lをDeepFaceのモデルとして登録"""
+# DeepFaceにAuraFaceモデルを登録する関数
+def register_auraface_to_deepface(session, model_info):
+    """AuraFaceをDeepFaceのモデルとして登録"""
     try:
-        # Buffalo_lインスタンスを作成
-        buffalo_l_instance = Buffalo_l_Model(session, model_info)
-        print("Buffalo_lをDeepFace形式で初期化しました")
-        return buffalo_l_instance
+        # AuraFaceインスタンスを作成
+        auraface_instance = AuraFace_Model(session, model_info)
+        print("AuraFaceをDeepFace形式で初期化しました")
+        return auraface_instance
         
     except Exception as e:
-        print(f"Buffalo_l登録エラー: {e}")
+        print(f"AuraFace登録エラー: {e}")
         return None
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -228,45 +228,128 @@ def benchmark_test():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="ベンチマークテストページが見つかりません")
 
-# Buffalo_lモデル設定（InsightFace）
+# Aurora FaceID モデル設定
 MODEL_CONFIG = {
-    "path": "w600k_r50.onnx",
-    "name": "Buffalo_l WebFace600K ResNet50",
-    "description": "WebFace600K（60万人、600万枚）で訓練された高精度モデル（InsightFace）",
-    "input_name": "input.1",
+    "path": "glintr100.onnx",
+    "name": "AuraFace v1",
+    "description": "GLint-R100データセットで訓練された高精度顔認識モデル（Apache 2.0ライセンス）",
+    "input_name": "data",
     "input_size": (112, 112),
-    "output_name": "683",
+    "output_name": "fc1",
     "embedding_size": 512
 }
 
-# Buffalo_lモデルの初期化
 def initialize_model():
-    model_path = MODEL_CONFIG["path"]
-    
-    if os.path.exists(model_path):
-        try:
-            session = onnxruntime.InferenceSession(
-                model_path, 
-                providers=['CPUExecutionProvider']
-            )
-            print(f"✅ {MODEL_CONFIG['name']} 読み込み完了")
-            return session
-        except Exception as e:
-            print(f"❌ {MODEL_CONFIG['name']} 読み込みエラー: {e}")
-            return None
-    else:
-        print(f"❌ 警告: {model_path} が見つかりません")
+    """AuraFaceモデルを初期化（MediaPipe顔検出）"""
+    try:
+        # AuraFace必要ライブラリの確認
+        import torch
+        from huggingface_hub import snapshot_download
+        
+        print("🔄 AuraFace-v1モデルをHuggingFaceからダウンロード中...")
+        
+        # HuggingFaceからAuraFaceモデルをダウンロード
+        model_dir = snapshot_download(
+            repo_id="fal/AuraFace-v1",
+            local_dir="./models/auraface",
+            ignore_patterns=["*.md", "*.txt", "*.jpg", "*.png"]
+        )
+        print(f"✅ AuraFaceモデルダウンロード完了: {model_dir}")
+        
+        # プロバイダー設定
+        providers = ['CPUExecutionProvider']
+        if torch.cuda.is_available():
+            providers.insert(0, 'CUDAExecutionProvider')
+        
+        # AuraFace認識モデルファイルのパス
+        model_path = os.path.join(model_dir, MODEL_CONFIG["path"])
+        
+        if not os.path.exists(model_path):
+            # 利用可能なONNXファイルを検索
+            onnx_files = [f for f in os.listdir(model_dir) if f.endswith('.onnx') and 'glintr' in f]
+            if onnx_files:
+                model_path = os.path.join(model_dir, onnx_files[0])
+                print(f"🔍 発見されたAuraFaceモデル: {onnx_files[0]}")
+            else:
+                raise FileNotFoundError(f"AuraFace認識モデルが見つかりません: {model_dir}")
+        
+        # AuraFace認識モデルをONNX Runtimeで読み込み
+        session = onnxruntime.InferenceSession(model_path, providers=providers)
+        
+        # MediaPipeベースのモデル構造を返す
+        model = {
+            'recognition_session': session,
+            'model_path': model_path
+        }
+        
+        print(f"✅ {MODEL_CONFIG['name']} + MediaPipe 初期化完了")
+        print(f"🔧 実行プロバイダー: {providers}")
+        return model
+        
+    except Exception as e:
+        print(f"❌ {MODEL_CONFIG['name']} 初期化エラー: {e}")
         return None
 
-# Buffalo_lモデルセッションを初期化
-buffalo_session = initialize_model()
+# AuraFaceモデルセッションを初期化
+auraface_session = initialize_model()
 
-print("🐃 Buffalo_l WebFace600K モデル（InsightFace）を使用します")
+print("🌟 AuraFace v1 + MediaPipe（Apache 2.0ライセンス）を使用します")
 
 # MediaPipe face detection and landmarks
 mp_face_detection = mp.solutions.face_detection
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
+
+def detect_and_align_mediapipe(image):
+    """MediaPipeを使用した顔検出とアライメント"""
+    with mp_face_mesh.FaceMesh(
+        static_image_mode=True,
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5
+    ) as face_mesh:
+        # RGB変換
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(rgb_image)
+        
+        if not results.multi_face_landmarks:
+            return None
+        
+        landmarks = results.multi_face_landmarks[0]
+        h, w = image.shape[:2]
+        
+        # 5つのキーポイントを抽出（目、鼻、口の端）
+        # MediaPipe landmark indices for face alignment
+        left_eye_idx = 33
+        right_eye_idx = 263
+        nose_idx = 1
+        left_mouth_idx = 61
+        right_mouth_idx = 291
+        
+        keypoints = np.array([
+            [landmarks.landmark[left_eye_idx].x * w, landmarks.landmark[left_eye_idx].y * h],
+            [landmarks.landmark[right_eye_idx].x * w, landmarks.landmark[right_eye_idx].y * h],
+            [landmarks.landmark[nose_idx].x * w, landmarks.landmark[nose_idx].y * h],
+            [landmarks.landmark[left_mouth_idx].x * w, landmarks.landmark[left_mouth_idx].y * h],
+            [landmarks.landmark[right_mouth_idx].x * w, landmarks.landmark[right_mouth_idx].y * h]
+        ], dtype=np.float32)
+        
+        # アライメント用の標準5点座標（112x112用）
+        dst_points = np.array([
+            [38.2946, 51.6963],
+            [73.5318, 51.5014],
+            [56.0252, 71.7366],
+            [41.5493, 92.3655],
+            [70.7299, 92.2041]
+        ], dtype=np.float32)
+        
+        # アフィン変換行列を計算
+        tform = cv2.estimateAffinePartial2D(keypoints, dst_points)[0]
+        
+        # 顔画像をアライメント
+        aligned_face = cv2.warpAffine(image, tform, (112, 112))
+        
+        return aligned_face
 
 def enhance_image_quality(image):
     """画像品質の向上処理"""
@@ -493,14 +576,15 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
 
 def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     """バッチ処理による高速な特徴量抽出"""
-    if buffalo_session is None:
-        return None, []
+    if auraface_session is None:
+        return [], []
     
     # 自動バッチサイズ調整
     if batch_size is None:
         batch_size = calculate_optimal_batch_size(len(file_paths))
     
-    session = buffalo_session
+    # 認識セッションを取得
+    recognition_session = auraface_session['recognition_session']
     input_name = MODEL_CONFIG["input_name"]
     
     all_embeddings = []
@@ -525,18 +609,48 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
                 print(f"⚠️ バッチ {batch_num}/{total_batches}: 処理可能な画像なし")
                 continue
             
-            # バッチ推論実行
-            embeddings = session.run(None, {input_name: batch_images})[0]
+            # AuraFaceハイブリッドアプローチ - 個別処理でバッチ風に実行
+            batch_embeddings = []
+            batch_valid_indices = []
             
-            # 正規化
-            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+            for j, file_path in enumerate(batch_files):
+                try:
+                    import cv2
+                    # 画像読み込み
+                    img = cv2.imread(file_path)
+                    if img is None:
+                        continue
+                        
+                    # MediaPipeで顔検出とアライメント
+                    face_aligned = detect_and_align_mediapipe(img)
+                    if face_aligned is None:
+                        continue
+                    
+                    # 前処理
+                    face_aligned = face_aligned.astype(np.float32)
+                    face_aligned = (face_aligned / 127.5) - 1.0
+                    face_aligned = np.transpose(face_aligned, (2, 0, 1))
+                    face_aligned = np.expand_dims(face_aligned, axis=0)
+                    
+                    # AuraFace認識
+                    outputs = recognition_session.run(None, {input_name: face_aligned})
+                    embedding = outputs[0][0]
+                    
+                    # 正規化
+                    embedding = embedding / np.linalg.norm(embedding)
+                    
+                    batch_embeddings.append(embedding)
+                    batch_valid_indices.append(i + j)
+                    
+                except Exception as e:
+                    print(f"⚠️ バッチ内ファイル処理エラー: {file_path} - {e}")
+                    continue
             
-            # 結果を保存（元のインデックスを調整）
-            adjusted_indices = [i + idx for idx in valid_indices]
-            all_embeddings.extend(embeddings)
-            all_valid_indices.extend(adjusted_indices)
+            # バッチ結果を保存
+            all_embeddings.extend(batch_embeddings)
+            all_valid_indices.extend(batch_valid_indices)
             
-            processed_count += len(embeddings)
+            processed_count += len(batch_embeddings)
             
             # 進捗表示
             if batch_num % 10 == 0 or batch_num == total_batches:
@@ -558,31 +672,49 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     print(f"✅ バッチ処理完了: {len(all_embeddings)}個の埋め込みベクトル生成")
     return all_embeddings, all_valid_indices
 
-def get_embedding_buffalo(file_path, use_detection=True):
-    """Buffalo_lモデルで埋め込みベクトルを取得"""
-    if buffalo_session is None:
+def get_embedding_auraface(file_path, use_detection=True):
+    """AuraFaceモデルで埋め込みベクトルを取得"""
+    if auraface_session is None:
         return {
             'embedding': None,
-            'error': 'Buffalo_lモデルが読み込まれていません',
+            'error': 'AuraFaceモデルが読み込まれていません',
             'processing_time': 0
         }
     
     start_time = time.time()
     try:
-        # 前処理
-        img = preprocess_image_for_model(file_path, use_detection)
+        import cv2
         
+        # 画像を読み込み
+        img = cv2.imread(file_path)
         if img is None:
             return {
                 'embedding': None,
-                'error': '画像処理に失敗',
+                'error': '画像読み込み失敗',
                 'processing_time': 0
             }
         
-        # 推論実行
+        # MediaPipeで顔検出とアライメント
+        face_aligned = detect_and_align_mediapipe(img)
+        
+        if face_aligned is None:
+            return {
+                'embedding': None,
+                'error': '顔が検出されませんでした',
+                'processing_time': 0
+            }
+        
+        # 入力データの前処理（[0,255] -> [-1,1]の正規化）
+        face_aligned = face_aligned.astype(np.float32)
+        face_aligned = (face_aligned / 127.5) - 1.0
+        face_aligned = np.transpose(face_aligned, (2, 0, 1))  # HWC -> CHW
+        face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
+        
+        # AuraFaceで埋め込みベクトル計算
+        recognition_session = auraface_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
-        embedding = buffalo_session.run(None, {input_name: img})[0]
-        embedding = embedding[0]
+        outputs = recognition_session.run(None, {input_name: face_aligned})
+        embedding = outputs[0][0]
         
         # 正規化
         embedding = embedding / np.linalg.norm(embedding)
@@ -604,20 +736,34 @@ def get_embedding_buffalo(file_path, use_detection=True):
 
 def get_embedding_single(file_path, use_detection=True):
     """単一ファイル処理（バッチ処理なし）"""
-    if buffalo_session is None:
+    if auraface_session is None:
         return None
     
     try:
-        # 1ファイルずつ処理
-        img = preprocess_image_for_model(file_path, use_detection)
+        import cv2
         
+        # 画像を読み込み
+        img = cv2.imread(file_path)
         if img is None:
             return None
         
-        # 推論実行（1ファイルずつ）
+        # MediaPipeで顔検出とアライメント
+        face_aligned = detect_and_align_mediapipe(img)
+        
+        if face_aligned is None:
+            return None
+        
+        # 入力データの前処理（[0,255] -> [-1,1]の正規化）
+        face_aligned = face_aligned.astype(np.float32)
+        face_aligned = (face_aligned / 127.5) - 1.0
+        face_aligned = np.transpose(face_aligned, (2, 0, 1))  # HWC -> CHW
+        face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
+        
+        # AuraFaceで埋め込みベクトル計算
+        recognition_session = auraface_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
-        embedding = buffalo_session.run(None, {input_name: img})[0]
-        embedding = embedding[0]
+        outputs = recognition_session.run(None, {input_name: face_aligned})
+        embedding = outputs[0][0]
         
         # 正規化
         embedding = embedding / np.linalg.norm(embedding)
@@ -672,11 +818,11 @@ def ensemble_verification(embeddings1, embeddings2):
     
     return results
 
-def compare_buffalo_faces(file_path1, file_path2):
-    """Buffalo_lモデルで2つの顔を比較"""
+def compare_auraface_faces(file_path1, file_path2):
+    """AuraFaceモデルで2つの顔を比較"""
     # 各画像の埋め込みベクトルを取得
-    embedding1 = get_embedding_buffalo(file_path1, use_detection=True)
-    embedding2 = get_embedding_buffalo(file_path2, use_detection=True)
+    embedding1 = get_embedding_auraface(file_path1, use_detection=True)
+    embedding2 = get_embedding_auraface(file_path2, use_detection=True)
     
     if (embedding1['embedding'] is not None and 
         embedding2['embedding'] is not None):
@@ -845,26 +991,26 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
     file2.file.seek(0)
     deepface_results = verify_faces(file1.file, file2.file)
     
-    # Buffalo_l顔認識処理
-    buffalo_comparison = compare_buffalo_faces(filename1, filename2)
+    # AuraFace顔認識処理
+    auraface_comparison = compare_auraface_faces(filename1, filename2)
     
-    # Buffalo_l埋め込みベクトル取得
-    emb1_buffalo = get_embedding_buffalo(filename1, use_detection=True)
-    emb2_buffalo = get_embedding_buffalo(filename2, use_detection=True)
+    # AuraFace埋め込みベクトル取得
+    emb1_auraface = get_embedding_auraface(filename1, use_detection=True)
+    emb2_auraface = get_embedding_auraface(filename2, use_detection=True)
     
-    if (emb1_buffalo['embedding'] is not None and 
-        emb2_buffalo['embedding'] is not None):
+    if (emb1_auraface['embedding'] is not None and 
+        emb2_auraface['embedding'] is not None):
         # アンサンブル検証を使用
         ensemble_results = ensemble_verification(
-            emb1_buffalo['embedding'], 
-            emb2_buffalo['embedding']
+            emb1_auraface['embedding'], 
+            emb2_auraface['embedding']
         )
-        similarity_buffalo = ensemble_results['cosine_similarity']
-        is_same_buffalo = ensemble_results['is_same_adaptive']
+        similarity_auraface = ensemble_results['cosine_similarity']
+        is_same_auraface = ensemble_results['is_same_adaptive']
         confidence_score = ensemble_results['confidence_score']
     else:
-        similarity_buffalo = 0.0
-        is_same_buffalo = False
+        similarity_auraface = 0.0
+        is_same_auraface = False
         confidence_score = 0.0
         ensemble_results = {
             'cosine_similarity': 0.0,
@@ -875,13 +1021,13 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             'confidence_score': 0.0
         }
     
-    # Buffalo_l埋め込みベクトルの詳細情報
-    buffalo_embedding_info = {
-        'emb1': emb1_buffalo['embedding'].tolist()[:20] if emb1_buffalo['embedding'] is not None else [],
-        'emb2': emb2_buffalo['embedding'].tolist()[:20] if emb2_buffalo['embedding'] is not None else [],
+    # AuraFace埋め込みベクトルの詳細情報
+    auraface_embedding_info = {
+        'emb1': emb1_auraface['embedding'].tolist()[:20] if emb1_auraface['embedding'] is not None else [],
+        'emb2': emb2_auraface['embedding'].tolist()[:20] if emb2_auraface['embedding'] is not None else [],
         'embedding_dims': MODEL_CONFIG['embedding_size'],
-        'emb1_norm': float(np.linalg.norm(emb1_buffalo['embedding'])) if emb1_buffalo['embedding'] is not None else 0.0,
-        'emb2_norm': float(np.linalg.norm(emb2_buffalo['embedding'])) if emb2_buffalo['embedding'] is not None else 0.0
+        'emb1_norm': float(np.linalg.norm(emb1_auraface['embedding'])) if emb1_auraface['embedding'] is not None else 0.0,
+        'emb2_norm': float(np.linalg.norm(emb2_auraface['embedding'])) if emb2_auraface['embedding'] is not None else 0.0
     }
     
     result = {
@@ -900,23 +1046,23 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             },
             "embeddings": deepface_results['arcface']['embeddings']
         },
-        "buffalo_l": {
-            "similarity": f"{similarity_buffalo:.4f}",
-            "is_same": is_same_buffalo,
+        "auraface": {
+            "similarity": f"{similarity_auraface:.4f}",
+            "is_same": is_same_auraface,
             "adaptive_threshold": f"{ensemble_results.get('adaptive_threshold', 0.5):.4f}",
             "confidence_score": f"{confidence_score:.4f}",
             "euclidean_distance": f"{ensemble_results.get('euclidean_distance', 0.0):.4f}",
             "l1_distance": f"{ensemble_results.get('l1_distance', 0.0):.4f}",
             "normalized_euclidean": f"{ensemble_results.get('normalized_euclidean', 0.0):.4f}",
-            "embeddings": buffalo_embedding_info,
-            "processing_time": f"{emb1_buffalo.get('processing_time', 0) + emb2_buffalo.get('processing_time', 0):.1f}ms"
+            "embeddings": auraface_embedding_info,
+            "processing_time": f"{emb1_auraface.get('processing_time', 0) + emb2_auraface.get('processing_time', 0):.1f}ms"
         },
         "img1_path": "/" + filename1,
         "img2_path": "/" + filename2,
-        "buffalo_comparison": buffalo_comparison,
+        "auraface_comparison": auraface_comparison,
         "model_info": {
             "deepface_arcface": "ArcFace (DeepFace implementation)",
-            "buffalo_l": MODEL_CONFIG['name'],
+            "auraface": MODEL_CONFIG['name'],
             "description": MODEL_CONFIG['description']
         }
     }
@@ -1128,8 +1274,8 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     print(f"クエリ画像保存完了: {query_filename}")
     
-    # Buffalo_lモデルでクエリ画像の埋め込みベクトルを取得
-    query_embedding = get_embedding_buffalo(query_filename, use_detection=True)
+    # AuraFaceモデルでクエリ画像の埋め込みベクトルを取得
+    query_embedding = get_embedding_auraface(query_filename, use_detection=True)
     
     # ファイル保存処理を実行
     file_info_list = await _save_files_individually(folder_images)
@@ -1159,7 +1305,7 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     # シンプルな順次処理を実行
     print(f"🔄 順次処理開始: {total_files}ファイル")
-    results = await _execute_comparison_buffalo(query_embedding, valid_file_info_list, batch_size, start_time)
+    results = await _execute_comparison_auraface(query_embedding, valid_file_info_list, batch_size, start_time)
     
     # 結果の整理と返却
     return _format_comparison_results(results, query_image, total_files, valid_file_info_list, start_time, is_chunk)
@@ -1242,11 +1388,11 @@ async def _execute_chunked_comparison(query_embeddings, valid_file_info_list, se
     print(f"🎉 段階的処理完了: 全{total_chunks}チャンク, {total_files}ファイル処理済み")
     return all_results
 
-async def _execute_comparison_buffalo(query_embedding, valid_file_info_list, batch_size, start_time):
-    """Buffalo_lモデルによるバッチ処理比較"""
+async def _execute_comparison_auraface(query_embedding, valid_file_info_list, batch_size, start_time):
+    """AuraFaceモデルによるバッチ処理比較"""
     total_files = len(valid_file_info_list)
     
-    print(f"🚀 Buffalo_l バッチ処理比較開始: {total_files}ファイル")
+    print(f"🚀 AuraFace バッチ処理比較開始: {total_files}ファイル")
     
     # バッチ処理でターゲット画像の埋め込みベクトルを一括取得
     target_file_paths = [file_info['filename'] for file_info in valid_file_info_list]
@@ -1268,6 +1414,7 @@ async def _execute_comparison_buffalo(query_embedding, valid_file_info_list, bat
     query_emb = query_embedding.get('embedding')
     if query_emb is None:
         print("❌ クエリ画像の埋め込みベクトルが見つかりません")
+        print(f"🔍 query_embedding内容: {query_embedding}")
         return []
     
     print(f"🔄 類似度計算開始...")
@@ -1289,7 +1436,7 @@ async def _execute_comparison_buffalo(query_embedding, valid_file_info_list, bat
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'buffalo_l': {
+                    'auraface': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1333,7 +1480,7 @@ async def _execute_comparison_buffalo(query_embedding, valid_file_info_list, bat
                 'error': 'バッチ処理でスキップ'
             })
     
-    print(f"✅ Buffalo_l バッチ処理完了: {len(results)}件の結果")
+    print(f"✅ AuraFace バッチ処理完了: {len(results)}件の結果")
     
     # 類似度の高い順にソート
     results.sort(key=lambda x: x['best_similarity'], reverse=True)
@@ -1397,7 +1544,7 @@ async def _execute_comparison_no_batch(query_embedding, valid_file_info_list, st
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'buffalo_l': {
+                    'auraface': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1493,7 +1640,7 @@ async def _execute_comparison(query_embeddings, valid_file_info_list, selected_m
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'buffalo_l': {
+                    'auraface': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1598,7 +1745,7 @@ async def compare_folder_benchmark(
             shutil.copyfileobj(query_image.file, buffer)
         
         # クエリ画像の埋め込みベクトルを取得
-        query_embedding = get_embedding_buffalo(query_filename, use_detection=True)
+        query_embedding = get_embedding_auraface(query_filename, use_detection=True)
         
         # ファイル保存処理
         file_info_list = await _save_files_individually(folder_images)
@@ -1611,7 +1758,7 @@ async def compare_folder_benchmark(
             # バッチ処理版
             optimal_batch_size = calculate_optimal_batch_size(len(valid_file_info_list))
             print(f"🚀 バッチ処理モード実行 (最適バッチサイズ: {optimal_batch_size})")
-            results = await _execute_comparison_buffalo(query_embedding, valid_file_info_list, optimal_batch_size, comparison_start_time)
+            results = await _execute_comparison_auraface(query_embedding, valid_file_info_list, optimal_batch_size, comparison_start_time)
         else:
             # 非バッチ処理版
             print(f"🐌 非バッチ処理モード実行 (1ファイルずつ順次処理)")
