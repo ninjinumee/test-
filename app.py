@@ -228,95 +228,40 @@ def benchmark_test():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="ベンチマークテストページが見つかりません")
 
-# 複数のArcFaceモデル設定
-MODELS = {
-    "original": {
-        "path": "model.onnx",
-        "url": "https://github.com/onnx/models/raw/main/vision/body_analysis/arcface/model/arcfaceresnet100-8.onnx",
-        "name": "ArcFace ResNet100-8 (Original)",
-        "description": "基本的なArcFaceモデル（ONNX Model Zoo）",
-        "input_name": "data",
-        "input_size": (112, 112),
-        "output_name": "fc1",
-        "embedding_size": 512
-    },
-    "buffalo_l": {
-        "path": "w600k_r50.onnx",
-        "url": None,  # 既にダウンロード済み
-        "name": "Buffalo_l WebFace600K ResNet50",
-        "description": "WebFace600K（60万人、600万枚）で訓練された高精度モデル",
-        "input_name": "input.1",
-        "input_size": (112, 112),
-        "output_name": "683",
-        "embedding_size": 512
-    },
-    "buffalo_det": {
-        "path": "w600k_r50.onnx",  # 同じモデルだが、Buffalo_l検出器を使用
-        "url": None,
-        "name": "Buffalo_l + RetinaFace Detection",
-        "description": "Buffalo_l専用検出器で前処理された高精度モデル",
-        "input_name": "input.1",
-        "input_size": (112, 112),
-        "output_name": "683",
-        "embedding_size": 512,
-        "use_buffalo_detector": True
-    }
+# Buffalo_lモデル設定（InsightFace）
+MODEL_CONFIG = {
+    "path": "w600k_r50.onnx",
+    "name": "Buffalo_l WebFace600K ResNet50",
+    "description": "WebFace600K（60万人、600万枚）で訓練された高精度モデル（InsightFace）",
+    "input_name": "input.1",
+    "input_size": (112, 112),
+    "output_name": "683",
+    "embedding_size": 512
 }
 
-def download_model():
-    for model_key, model_info in MODELS.items():
-        if model_info["url"] and not os.path.exists(model_info["path"]):
-            print(f"{model_info['name']}が見つかりません。ダウンロードします...")
-            urllib.request.urlretrieve(model_info["url"], model_info["path"])
-            print(f"{model_info['name']}のダウンロードが完了しました。")
-
-download_model()
-
-# 複数のONNXセッションを作成（重複を避ける）
-sessions = {}
-loaded_paths = set()
-
-for model_key, model_info in MODELS.items():
-    model_path = model_info["path"]
+# Buffalo_lモデルの初期化
+def initialize_model():
+    model_path = MODEL_CONFIG["path"]
     
     if os.path.exists(model_path):
         try:
-            # 既に同じパスのモデルが読み込まれている場合は共有
-            if model_path in loaded_paths:
-                # 既存のセッションを見つけて共有
-                for existing_key, existing_session in sessions.items():
-                    if MODELS[existing_key]["path"] == model_path:
-                        sessions[model_key] = existing_session
-                        print(f"{model_info['name']} セッション共有")
-                        break
-            else:
-                # 新しいセッションを作成
-                sessions[model_key] = onnxruntime.InferenceSession(
-                    model_path, 
-                    providers=['CPUExecutionProvider']
-                )
-                loaded_paths.add(model_path)
-                print(f"{model_info['name']} 読み込み完了")
-                
+            session = onnxruntime.InferenceSession(
+                model_path, 
+                providers=['CPUExecutionProvider']
+            )
+            print(f"✅ {MODEL_CONFIG['name']} 読み込み完了")
+            return session
         except Exception as e:
-            print(f"{model_info['name']} 読み込みエラー: {e}")
+            print(f"❌ {MODEL_CONFIG['name']} 読み込みエラー: {e}")
+            return None
     else:
-        print(f"警告: {model_path} が見つかりません")
+        print(f"❌ 警告: {model_path} が見つかりません")
+        return None
 
-# Buffalo_lモデルのDeepFace統合を試行（実験的機能）
-buffalo_l_deepface = None
-# 注意: この機能は実験的なため、一時的に無効化
-# if 'buffalo_l' in sessions:
-#     try:
-#         buffalo_l_deepface = register_buffalo_l_to_deepface(
-#             sessions['buffalo_l'], 
-#             MODELS['buffalo_l']
-#         )
-#         if buffalo_l_deepface:
-#             print("Buffalo_lのDeepFace統合に成功しました")
-#     except Exception as e:
-#         print(f"Buffalo_lのDeepFace統合に失敗: {e}")
-print("Buffalo_lは専用のマルチモデル比較システムで利用されます")
+# Buffalo_lモデルセッションを初期化
+buffalo_session = initialize_model()
+
+print("🐃 Buffalo_l WebFace600K モデル（InsightFace）を使用します")
 
 # MediaPipe face detection and landmarks
 mp_face_detection = mp.solutions.face_detection
@@ -442,10 +387,9 @@ def detect_and_align_face(image_path):
     
     return aligned_image  # 顔が検出されない場合はアライメント済み画像を返す
 
-def preprocess_image_for_model(file_path, model_key, use_detection=True):
-    """モデル固有の前処理"""
-    model_info = MODELS[model_key]
-    input_size = model_info["input_size"]
+def preprocess_image_for_model(file_path, use_detection=True):
+    """Buffalo_lモデル用の前処理"""
+    input_size = MODEL_CONFIG["input_size"]
     
     if use_detection:
         # 顔検出とクロップ
@@ -466,12 +410,8 @@ def preprocess_image_for_model(file_path, model_key, use_detection=True):
     img = np.expand_dims(img, axis=0)   # NCHW
     return img
 
-def preprocess_image_onnx_with_detection(file_path):
-    """後方互換性のための関数"""
-    return preprocess_image_for_model(file_path, "original", use_detection=True)
-
-def preprocess_image_onnx(file):
-    """後方互換性のための関数"""
+def preprocess_image_simple(file):
+    """シンプルな前処理（顔検出なし）"""
     img = Image.open(file).convert('RGB').resize((112, 112))
     img = np.asarray(img, dtype=np.float32)
     img = (img - 127.5) / 128.0
@@ -479,10 +419,9 @@ def preprocess_image_onnx(file):
     img = np.expand_dims(img, axis=0)   # NCHW
     return img
 
-def preprocess_images_batch(file_paths, model_key, use_detection=True, batch_size=32):
+def preprocess_images_batch(file_paths, use_detection=True, batch_size=32):
     """複数画像のバッチ前処理"""
-    model_info = MODELS[model_key]
-    input_size = model_info["input_size"]
+    input_size = MODEL_CONFIG["input_size"]
     
     batch_images = []
     valid_indices = []
@@ -552,18 +491,17 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
     print(f"📊 バッチサイズ計算: メモリベース={max_batch_by_memory}, ファイルベース={file_based_batch}, 最適={optimal_batch}")
     return optimal_batch
 
-def get_embedding_batch(file_paths, model_key='buffalo_l', use_detection=True, batch_size=None):
+def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     """バッチ処理による高速な特徴量抽出"""
-    if model_key not in sessions:
+    if buffalo_session is None:
         return None, []
     
     # 自動バッチサイズ調整
     if batch_size is None:
         batch_size = calculate_optimal_batch_size(len(file_paths))
     
-    session = sessions[model_key]
-    model_info = MODELS[model_key]
-    input_name = model_info["input_name"]
+    session = buffalo_session
+    input_name = MODEL_CONFIG["input_name"]
     
     all_embeddings = []
     all_valid_indices = []
@@ -580,7 +518,7 @@ def get_embedding_batch(file_paths, model_key='buffalo_l', use_detection=True, b
         try:
             # バッチ前処理
             batch_images, valid_indices = preprocess_images_batch(
-                batch_files, model_key, use_detection, batch_size
+                batch_files, use_detection, batch_size
             )
             
             if batch_images is None:
@@ -614,87 +552,81 @@ def get_embedding_batch(file_paths, model_key='buffalo_l', use_detection=True, b
             # メモリエラーの場合はバッチサイズを半分にして再試行
             if "memory" in str(e).lower() or "allocation" in str(e).lower():
                 print(f"🔄 メモリエラー検出、バッチサイズを半分に削減: {batch_size} → {batch_size//2}")
-                return get_embedding_batch(file_paths, model_key, use_detection, max(batch_size//2, 4))
+                return get_embedding_batch(file_paths, use_detection, max(batch_size//2, 4))
             continue
     
     print(f"✅ バッチ処理完了: {len(all_embeddings)}個の埋め込みベクトル生成")
     return all_embeddings, all_valid_indices
 
-def get_embedding_multi_models(file_path, use_detection=True, selected_models=None):
-    """複数のモデルで埋め込みベクトルを取得"""
-    results = {}
-    import time
+def get_embedding_buffalo(file_path, use_detection=True):
+    """Buffalo_lモデルで埋め込みベクトルを取得"""
+    if buffalo_session is None:
+        return {
+            'embedding': None,
+            'error': 'Buffalo_lモデルが読み込まれていません',
+            'processing_time': 0
+        }
     
-    # 使用するモデルを決定
-    models_to_use = selected_models if selected_models else sessions.keys()
-    
-    for model_key in models_to_use:
-        if model_key not in sessions:
-            continue
-            
-        session = sessions[model_key]
-        start_time = time.time()
-        try:
-            # モデル固有の前処理
-            img = preprocess_image_for_model(file_path, model_key, use_detection)
-            
-            if img is None:
-                results[model_key] = {
-                    'embedding': None,
-                    'error': '画像処理に失敗',
-                    'processing_time': 0
-                }
-                continue
-            
-            # モデル固有の入力名を使用
-            model_info = MODELS[model_key]
-            input_name = model_info["input_name"]
-            
-            # 推論実行
-            embedding = session.run(None, {input_name: img})[0]
-            embedding = embedding[0]
-            
-            # 正規化
-            embedding = embedding / np.linalg.norm(embedding)
-            
-            processing_time = (time.time() - start_time) * 1000  # ms
-            
-            results[model_key] = {
-                'embedding': embedding,
-                'error': None,
-                'processing_time': processing_time
-            }
-            
-        except Exception as e:
-            results[model_key] = {
+    start_time = time.time()
+    try:
+        # 前処理
+        img = preprocess_image_for_model(file_path, use_detection)
+        
+        if img is None:
+            return {
                 'embedding': None,
-                'error': str(e),
-                'processing_time': (time.time() - start_time) * 1000
+                'error': '画像処理に失敗',
+                'processing_time': 0
             }
-    
-    return results
+        
+        # 推論実行
+        input_name = MODEL_CONFIG["input_name"]
+        embedding = buffalo_session.run(None, {input_name: img})[0]
+        embedding = embedding[0]
+        
+        # 正規化
+        embedding = embedding / np.linalg.norm(embedding)
+        
+        processing_time = (time.time() - start_time) * 1000  # ms
+        
+        return {
+            'embedding': embedding,
+            'error': None,
+            'processing_time': processing_time
+        }
+        
+    except Exception as e:
+        return {
+            'embedding': None,
+            'error': str(e),
+            'processing_time': (time.time() - start_time) * 1000
+        }
 
-def get_embedding_onnx_with_detection(file_path):
-    """後方互換性のための関数"""
-    if 'original' in sessions:
-        img = preprocess_image_onnx_with_detection(file_path)
+def get_embedding_single(file_path, use_detection=True):
+    """単一ファイル処理（バッチ処理なし）"""
+    if buffalo_session is None:
+        return None
+    
+    try:
+        # 1ファイルずつ処理
+        img = preprocess_image_for_model(file_path, use_detection)
+        
         if img is None:
             return None
-        embedding = sessions['original'].run(None, {'data': img})[0]
+        
+        # 推論実行（1ファイルずつ）
+        input_name = MODEL_CONFIG["input_name"]
+        embedding = buffalo_session.run(None, {input_name: img})[0]
         embedding = embedding[0]
+        
+        # 正規化
         embedding = embedding / np.linalg.norm(embedding)
+        
         return embedding
-    return None
-
-def get_embedding_onnx(file):
-    """後方互換性のための関数"""
-    if 'original' in sessions:
-        img = preprocess_image_onnx(file)
-        embedding = sessions['original'].run(None, {'data': img})[0]
-        embedding = embedding[0]
-        embedding = embedding / np.linalg.norm(embedding)
-        return embedding
-    return None
+        
+    except Exception as e:
+        print(f"❌ 単一ファイル推論エラー: {e}")
+        return None
 
 def cosine_similarity(a, b):
     return float(np.dot(a, b))
@@ -740,118 +672,37 @@ def ensemble_verification(embeddings1, embeddings2):
     
     return results
 
-def compare_models(file_path1, file_path2):
-    """複数のArcFaceモデルで性能比較"""
-    # 各モデルで埋め込みベクトルを取得
-    embeddings1 = get_embedding_multi_models(file_path1, use_detection=True)
-    embeddings2 = get_embedding_multi_models(file_path2, use_detection=True)
+def compare_buffalo_faces(file_path1, file_path2):
+    """Buffalo_lモデルで2つの顔を比較"""
+    # 各画像の埋め込みベクトルを取得
+    embedding1 = get_embedding_buffalo(file_path1, use_detection=True)
+    embedding2 = get_embedding_buffalo(file_path2, use_detection=True)
     
-    model_results = {}
-    
-    for model_key in sessions.keys():
-        if (embeddings1[model_key]['embedding'] is not None and 
-            embeddings2[model_key]['embedding'] is not None):
-            
-            # アンサンブル検証
-            ensemble_result = ensemble_verification(
-                embeddings1[model_key]['embedding'],
-                embeddings2[model_key]['embedding']
-            )
-            
-            model_results[model_key] = {
-                'model_info': MODELS[model_key],
-                'ensemble_result': ensemble_result,
-                'processing_time': (embeddings1[model_key]['processing_time'] + 
-                                   embeddings2[model_key]['processing_time']),
-                'error': None
-            }
-        else:
-            error_msg = (embeddings1[model_key].get('error', 'Unknown error') + '; ' +
-                        embeddings2[model_key].get('error', 'Unknown error'))
-            model_results[model_key] = {
-                'model_info': MODELS[model_key],
-                'ensemble_result': None,
-                'processing_time': 0,
-                'error': error_msg
-            }
-    
-    # アンサンブル投票システム
-    votes = []
-    confidences = []
-    
-    for model_key, result in model_results.items():
-        if result['ensemble_result'] is not None:
-            votes.append(result['ensemble_result']['is_same_adaptive'])
-            confidences.append(result['ensemble_result']['confidence_score'])
-    
-    # 最終判定
-    if votes:
-        ensemble_decision = sum(votes) > len(votes) / 2  # 過半数決
-        avg_confidence = sum(confidences) / len(confidences)
-        agreement_score = sum(votes) / len(votes) if votes else 0
-    else:
-        ensemble_decision = False
-        avg_confidence = 0.0
-        agreement_score = 0.0
-    
-    return {
-        'individual_results': model_results,
-        'ensemble_decision': ensemble_decision,
-        'average_confidence': avg_confidence,
-        'agreement_score': agreement_score,
-        'total_models': len(sessions),
-        'successful_models': len([r for r in model_results.values() if r['error'] is None])
-    }
-
-def compare_buffalo_l_with_deepface(file_path1, file_path2):
-    """Buffalo_lとDeepFace ArcFaceの直接比較"""
-    results = {}
-    
-    if buffalo_l_deepface is None:
-        return {"error": "Buffalo_lのDeepFace統合が利用できません"}
-    
-    try:
-        # DeepFace ArcFace (標準)
-        deepface_embedding1 = DeepFace.represent(file_path1, model_name='ArcFace')[0]['embedding']
-        deepface_embedding2 = DeepFace.represent(file_path2, model_name='ArcFace')[0]['embedding']
-        deepface_similarity = cosine_similarity(
-            np.array(deepface_embedding1), 
-            np.array(deepface_embedding2)
+    if (embedding1['embedding'] is not None and 
+        embedding2['embedding'] is not None):
+        
+        # アンサンブル検証
+        ensemble_result = ensemble_verification(
+            embedding1['embedding'],
+            embedding2['embedding']
         )
         
-        # Buffalo_l (カスタム)
-        # 画像を読み込んでBuffalo_l形式で前処理
-        img1 = preprocess_image_for_model(file_path1, "buffalo_l", use_detection=True)
-        img2 = preprocess_image_for_model(file_path2, "buffalo_l", use_detection=True)
-        
-        if img1 is not None and img2 is not None:
-            # HWC形式に変換してBuffalo_lモデルに渡す
-            img1_hwc = np.transpose(img1[0], (1, 2, 0))  # CHW -> HWC
-            img2_hwc = np.transpose(img2[0], (1, 2, 0))
-            
-            buffalo_embedding1 = buffalo_l_deepface.predict(img1_hwc)[0]
-            buffalo_embedding2 = buffalo_l_deepface.predict(img2_hwc)[0]
-            buffalo_similarity = cosine_similarity(buffalo_embedding1, buffalo_embedding2)
-            
-            results = {
-                "deepface_arcface": {
-                    "similarity": f"{deepface_similarity:.4f}",
-                    "embedding_norm": f"{np.linalg.norm(deepface_embedding1):.4f}"
-                },
-                "buffalo_l": {
-                    "similarity": f"{buffalo_similarity:.4f}",
-                    "embedding_norm": f"{np.linalg.norm(buffalo_embedding1):.4f}"
-                },
-                "similarity_difference": f"{abs(deepface_similarity - buffalo_similarity):.4f}",
-                "model_agreement": "一致" if abs(deepface_similarity - buffalo_similarity) < 0.1 else "相違"
-            }
-        else:
-            results = {"error": "Buffalo_l画像前処理に失敗"}
-            
-    except Exception as e:
-        results = {"error": f"比較処理エラー: {str(e)}"}
-    
-    return results
+        return {
+            'model_info': MODEL_CONFIG,
+            'ensemble_result': ensemble_result,
+            'processing_time': (embedding1['processing_time'] + 
+                               embedding2['processing_time']),
+            'error': None
+        }
+    else:
+        error_msg = embedding1.get('error', 'Unknown error') + '; ' + embedding2.get('error', 'Unknown error')
+        return {
+            'model_info': MODEL_CONFIG,
+            'ensemble_result': None,
+            'processing_time': 0,
+            'error': error_msg
+        }
+
 
 def save_temp_image(file):
     file.seek(0)  # ファイルポインタを先頭に戻す
@@ -994,31 +845,26 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
     file2.file.seek(0)
     deepface_results = verify_faces(file1.file, file2.file)
     
-    # ONNX ArcFace verification (original method)
-    file1.file.seek(0)
-    file2.file.seek(0)
-    emb1_onnx = get_embedding_onnx(file1.file)
-    emb2_onnx = get_embedding_onnx(file2.file)
-    similarity_onnx = cosine_similarity(emb1_onnx, emb2_onnx)
-    threshold_onnx = 0.30
-    is_same_onnx = similarity_onnx > threshold_onnx
+    # Buffalo_l顔認識処理
+    buffalo_comparison = compare_buffalo_faces(filename1, filename2)
     
-    # マルチモデル比較
-    multi_model_results = compare_models(filename1, filename2)
+    # Buffalo_l埋め込みベクトル取得
+    emb1_buffalo = get_embedding_buffalo(filename1, use_detection=True)
+    emb2_buffalo = get_embedding_buffalo(filename2, use_detection=True)
     
-    # 後方互換性のために単一モデル結果も保持
-    emb1_onnx_detected = get_embedding_onnx_with_detection(filename1)
-    emb2_onnx_detected = get_embedding_onnx_with_detection(filename2)
-    
-    if emb1_onnx_detected is not None and emb2_onnx_detected is not None:
+    if (emb1_buffalo['embedding'] is not None and 
+        emb2_buffalo['embedding'] is not None):
         # アンサンブル検証を使用
-        ensemble_results = ensemble_verification(emb1_onnx_detected, emb2_onnx_detected)
-        similarity_onnx_detected = ensemble_results['cosine_similarity']
-        is_same_onnx_detected = ensemble_results['is_same_adaptive']
+        ensemble_results = ensemble_verification(
+            emb1_buffalo['embedding'], 
+            emb2_buffalo['embedding']
+        )
+        similarity_buffalo = ensemble_results['cosine_similarity']
+        is_same_buffalo = ensemble_results['is_same_adaptive']
         confidence_score = ensemble_results['confidence_score']
     else:
-        similarity_onnx_detected = 0.0
-        is_same_onnx_detected = False
+        similarity_buffalo = 0.0
+        is_same_buffalo = False
         confidence_score = 0.0
         ensemble_results = {
             'cosine_similarity': 0.0,
@@ -1029,13 +875,13 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             'confidence_score': 0.0
         }
     
-    # ONNX埋め込みベクトルの詳細情報
-    onnx_embedding_info = {
-        'emb1': emb1_onnx.tolist()[:20],  # 最初の20次元表示
-        'emb2': emb2_onnx.tolist()[:20],
-        'embedding_dims': len(emb1_onnx),
-        'emb1_norm': float(np.linalg.norm(emb1_onnx)),
-        'emb2_norm': float(np.linalg.norm(emb2_onnx))
+    # Buffalo_l埋め込みベクトルの詳細情報
+    buffalo_embedding_info = {
+        'emb1': emb1_buffalo['embedding'].tolist()[:20] if emb1_buffalo['embedding'] is not None else [],
+        'emb2': emb2_buffalo['embedding'].tolist()[:20] if emb2_buffalo['embedding'] is not None else [],
+        'embedding_dims': MODEL_CONFIG['embedding_size'],
+        'emb1_norm': float(np.linalg.norm(emb1_buffalo['embedding'])) if emb1_buffalo['embedding'] is not None else 0.0,
+        'emb2_norm': float(np.linalg.norm(emb2_buffalo['embedding'])) if emb2_buffalo['embedding'] is not None else 0.0
     }
     
     result = {
@@ -1054,47 +900,24 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             },
             "embeddings": deepface_results['arcface']['embeddings']
         },
-        "onnx_arcface": {
-            "original": {
-                "similarity": f"{similarity_onnx:.4f}",
-                "is_same": is_same_onnx,
-                "threshold": "0.3000"
-            },
-            "enhanced": {
-                "similarity": f"{similarity_onnx_detected:.4f}",
-                "is_same": is_same_onnx_detected,
-                "adaptive_threshold": f"{ensemble_results.get('adaptive_threshold', 0.5):.4f}",
-                "confidence_score": f"{confidence_score:.4f}",
-                "euclidean_distance": f"{ensemble_results.get('euclidean_distance', 0.0):.4f}",
-                "l1_distance": f"{ensemble_results.get('l1_distance', 0.0):.4f}",
-                "normalized_euclidean": f"{ensemble_results.get('normalized_euclidean', 0.0):.4f}"
-            },
-            "embeddings": onnx_embedding_info
+        "buffalo_l": {
+            "similarity": f"{similarity_buffalo:.4f}",
+            "is_same": is_same_buffalo,
+            "adaptive_threshold": f"{ensemble_results.get('adaptive_threshold', 0.5):.4f}",
+            "confidence_score": f"{confidence_score:.4f}",
+            "euclidean_distance": f"{ensemble_results.get('euclidean_distance', 0.0):.4f}",
+            "l1_distance": f"{ensemble_results.get('l1_distance', 0.0):.4f}",
+            "normalized_euclidean": f"{ensemble_results.get('normalized_euclidean', 0.0):.4f}",
+            "embeddings": buffalo_embedding_info,
+            "processing_time": f"{emb1_buffalo.get('processing_time', 0) + emb2_buffalo.get('processing_time', 0):.1f}ms"
         },
         "img1_path": "/" + filename1,
         "img2_path": "/" + filename2,
-        "multi_model_comparison": {
-            "ensemble_decision": multi_model_results['ensemble_decision'],
-            "average_confidence": f"{multi_model_results['average_confidence']:.4f}",
-            "agreement_score": f"{multi_model_results['agreement_score']:.4f}",
-            "successful_models": f"{multi_model_results['successful_models']}/{multi_model_results['total_models']}",
-            "individual_results": {
-                model_key: {
-                    "model_name": result['model_info']['name'],
-                    "model_description": result['model_info']['description'],
-                    "processing_time": f"{result['processing_time']:.1f}ms",
-                    "similarity": f"{result['ensemble_result']['cosine_similarity']:.4f}" if result['ensemble_result'] else "N/A",
-                    "is_same": result['ensemble_result']['is_same_adaptive'] if result['ensemble_result'] else False,
-                    "confidence": f"{result['ensemble_result']['confidence_score']:.4f}" if result['ensemble_result'] else "0.0000",
-                    "adaptive_threshold": f"{result['ensemble_result']['adaptive_threshold']:.4f}" if result['ensemble_result'] else "N/A",
-                    "error": result['error']
-                } for model_key, result in multi_model_results['individual_results'].items()
-            }
-        },
+        "buffalo_comparison": buffalo_comparison,
         "model_info": {
             "deepface_arcface": "ArcFace (DeepFace implementation)",
-            "available_onnx_models": len(sessions),
-            "loaded_models": list(sessions.keys())
+            "buffalo_l": MODEL_CONFIG['name'],
+            "description": MODEL_CONFIG['description']
         }
     }
     return templates.TemplateResponse("index.html", {"request": request, "result": result})
@@ -1305,12 +1128,8 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     print(f"クエリ画像保存完了: {query_filename}")
     
-    # 1対N検索で使用するモデル（Buffalo_l のみ）
-    selected_models = ['buffalo_l']  # Buffalo_l WebFace600K のみ
-    use_deepface = False  # DeepFaceは使用しない
-    
-    # クエリ画像の埋め込みベクトルを取得（選択されたモデルのみ）
-    query_embeddings = get_embedding_multi_models(query_filename, use_detection=True, selected_models=selected_models)
+    # Buffalo_lモデルでクエリ画像の埋め込みベクトルを取得
+    query_embedding = get_embedding_buffalo(query_filename, use_detection=True)
     
     # ファイル保存処理を実行
     file_info_list = await _save_files_individually(folder_images)
@@ -1340,10 +1159,10 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     # シンプルな順次処理を実行
     print(f"🔄 順次処理開始: {total_files}ファイル")
-    results = await _execute_comparison(query_embeddings, valid_file_info_list, selected_models, use_multiprocessing, batch_size, max_workers, memory_cleanup_interval, start_time, query_filename)
+    results = await _execute_comparison_buffalo(query_embedding, valid_file_info_list, batch_size, start_time)
     
     # 結果の整理と返却
-    return _format_comparison_results(results, query_image, total_files, valid_file_info_list, selected_models, start_time, is_chunk)
+    return _format_comparison_results(results, query_image, total_files, valid_file_info_list, start_time, is_chunk)
 
 async def _save_files_individually(folder_images):
     """シンプルなファイル保存処理（最適化なし）"""
@@ -1423,43 +1242,123 @@ async def _execute_chunked_comparison(query_embeddings, valid_file_info_list, se
     print(f"🎉 段階的処理完了: 全{total_chunks}チャンク, {total_files}ファイル処理済み")
     return all_results
 
-def get_embedding_single(file_path, model_key='buffalo_l', use_detection=True):
-    """単一ファイル処理（バッチ処理なし）- 速度比較用"""
-    if model_key not in sessions:
-        return None
+async def _execute_comparison_buffalo(query_embedding, valid_file_info_list, batch_size, start_time):
+    """Buffalo_lモデルによるバッチ処理比較"""
+    total_files = len(valid_file_info_list)
     
-    session = sessions[model_key]
-    model_info = MODELS[model_key]
-    input_name = model_info["input_name"]
+    print(f"🚀 Buffalo_l バッチ処理比較開始: {total_files}ファイル")
     
-    try:
-        # 1ファイルずつ処理
-        img = preprocess_image_for_model(file_path, model_key, use_detection)
-        
-        if img is None:
-            return None
-        
-        # 推論実行（1ファイルずつ）
-        embedding = session.run(None, {input_name: img})[0]
-        embedding = embedding[0]
-        
-        # 正規化
-        embedding = embedding / np.linalg.norm(embedding)
-        
-        return embedding
-        
-    except Exception as e:
-        print(f"❌ 単一ファイル推論エラー: {e}")
-        return None
+    # バッチ処理でターゲット画像の埋め込みベクトルを一括取得
+    target_file_paths = [file_info['filename'] for file_info in valid_file_info_list]
+    
+    print(f"📊 バッチ特徴量抽出開始... (バッチサイズ: {batch_size})")
+    target_embeddings, valid_indices = get_embedding_batch(
+        target_file_paths, 
+        use_detection=True,
+        batch_size=batch_size
+    )
+    
+    if not target_embeddings:
+        print("❌ バッチ特徴量抽出に失敗")
+        return []
+    
+    print(f"✅ バッチ特徴量抽出完了: {len(target_embeddings)}個の埋め込みベクトル")
+    
+    # クエリ埋め込みベクトルを取得
+    query_emb = query_embedding.get('embedding')
+    if query_emb is None:
+        print("❌ クエリ画像の埋め込みベクトルが見つかりません")
+        return []
+    
+    print(f"🔄 類似度計算開始...")
+    results = []
+    
+    # バッチで取得した埋め込みベクトルと比較
+    for i, (target_emb, file_idx) in enumerate(zip(target_embeddings, valid_indices)):
+        try:
+            file_info = valid_file_info_list[file_idx]
+            
+            # コサイン類似度計算（高速化）
+            similarity_score = float(np.dot(query_emb, target_emb))
+            
+            # 結果を追加
+            results.append({
+                'filename': os.path.basename(file_info['filename']),
+                'original_filename': file_info['original_name'],
+                'image_path': "/" + file_info['filename'],
+                'best_similarity': similarity_score,
+                'best_model': MODEL_CONFIG['name'],
+                'model_results': {
+                    'buffalo_l': {
+                        'model_name': MODEL_CONFIG['name'],
+                        'similarity': similarity_score,
+                        'confidence': min(similarity_score * 1.2, 1.0),
+                        'is_same': similarity_score > 0.45
+                    }
+                },
+                'is_match': similarity_score > 0.45
+            })
+            
+            # 進捗表示
+            if (i + 1) % 500 == 0 or i == len(target_embeddings) - 1:
+                progress = (i + 1) / len(target_embeddings) * 100
+                print(f"📈 類似度計算: {i + 1}/{len(target_embeddings)} ({progress:.1f}%)")
+            
+        except Exception as e:
+            print(f"❌ 類似度計算エラー [{i}]: {e}")
+            file_info = valid_file_info_list[file_idx] if file_idx < len(valid_file_info_list) else {'filename': 'unknown', 'original_name': 'unknown'}
+            results.append({
+                'filename': os.path.basename(file_info.get('filename', 'unknown')),
+                'original_filename': file_info.get('original_name', 'unknown'),
+                'image_path': None,
+                'best_similarity': 0.0,
+                'best_model': 'N/A',
+                'model_results': {},
+                'is_match': False,
+                'error': str(e)
+            })
+    
+    # 処理できなかったファイル（バッチ処理でスキップされたファイル）を追加
+    processed_indices = set(valid_indices)
+    for idx, file_info in enumerate(valid_file_info_list):
+        if idx not in processed_indices:
+            results.append({
+                'filename': os.path.basename(file_info['filename']),
+                'original_filename': file_info['original_name'],
+                'image_path': "/" + file_info['filename'],
+                'best_similarity': 0.0,
+                'best_model': 'N/A',
+                'model_results': {},
+                'is_match': False,
+                'error': 'バッチ処理でスキップ'
+            })
+    
+    print(f"✅ Buffalo_l バッチ処理完了: {len(results)}件の結果")
+    
+    # 類似度の高い順にソート
+    results.sort(key=lambda x: x['best_similarity'], reverse=True)
+    
+    # 順位を追加
+    for idx, result in enumerate(results):
+        result['rank'] = idx + 1
+    
+    top10_similarities = [f"{r['best_similarity']:.3f}" for r in results[:10]]
+    print(f"🏆 結果ソート完了: 上位10件の類似度 {top10_similarities}")
+    
+    processing_time = time.time() - start_time
+    print(f"⏱️ 総処理時間: {processing_time:.2f}秒 ({len(results)/processing_time:.1f}ファイル/秒)")
+    
+    return results
 
-async def _execute_comparison_no_batch(query_embeddings, valid_file_info_list, selected_models, start_time, query_filename):
+
+async def _execute_comparison_no_batch(query_embedding, valid_file_info_list, start_time):
     """バッチ処理なしの比較処理（速度比較用）"""
     total_files = len(valid_file_info_list)
     
     print(f"🐌 非バッチ処理比較開始: {total_files}ファイル（1ファイルずつ順次処理）")
     
     # クエリ埋め込みベクトルを取得
-    query_emb = query_embeddings.get('buffalo_l', {}).get('embedding')
+    query_emb = query_embedding.get('embedding')
     if query_emb is None:
         print("❌ クエリ画像の埋め込みベクトルが見つかりません")
         return []
@@ -1471,7 +1370,7 @@ async def _execute_comparison_no_batch(query_embeddings, valid_file_info_list, s
     for i, file_info in enumerate(valid_file_info_list):
         try:
             # 1ファイルずつ埋め込みベクトルを取得
-            target_emb = get_embedding_single(file_info['filename'], model_key='buffalo_l', use_detection=True)
+            target_emb = get_embedding_single(file_info['filename'], use_detection=True)
             
             if target_emb is None:
                 # 処理失敗の場合
@@ -1496,10 +1395,10 @@ async def _execute_comparison_no_batch(query_embeddings, valid_file_info_list, s
                 'original_filename': file_info['original_name'],
                 'image_path': "/" + file_info['filename'],
                 'best_similarity': similarity_score,
-                'best_model': 'Buffalo_l WebFace600K ResNet50',
+                'best_model': MODEL_CONFIG['name'],
                 'model_results': {
                     'buffalo_l': {
-                        'model_name': 'Buffalo_l WebFace600K ResNet50',
+                        'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
                         'is_same': similarity_score > 0.45
@@ -1592,10 +1491,10 @@ async def _execute_comparison(query_embeddings, valid_file_info_list, selected_m
                 'original_filename': file_info['original_name'],
                 'image_path': "/" + file_info['filename'],
                 'best_similarity': similarity_score,
-                'best_model': 'Buffalo_l WebFace600K ResNet50',
+                'best_model': MODEL_CONFIG['name'],
                 'model_results': {
                     'buffalo_l': {
-                        'model_name': 'Buffalo_l WebFace600K ResNet50',
+                        'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
                         'is_same': similarity_score > 0.45
@@ -1655,7 +1554,7 @@ async def _execute_comparison(query_embeddings, valid_file_info_list, selected_m
     
     return results
 
-def _format_comparison_results(results, query_image, total_files, valid_file_info_list, selected_models, start_time, is_chunk=False):
+def _format_comparison_results(results, query_image, total_files, valid_file_info_list, start_time, is_chunk=False):
     """結果のフォーマット"""
     total_processing_time = time.time() - start_time
     files_per_second = len(results) / total_processing_time if total_processing_time > 0 else 0
@@ -1670,10 +1569,8 @@ def _format_comparison_results(results, query_image, total_files, valid_file_inf
         'showing_top': len(results),
         'is_chunk': is_chunk,
         'processing_summary': {
-            'available_models': selected_models,
-            'model_descriptions': {
-                'buffalo_l': 'Buffalo_l WebFace600K ResNet50 (高精度)'
-            },
+            'model': MODEL_CONFIG['name'],
+            'model_description': MODEL_CONFIG['description'],
             'threshold_used': 0.45,
             'total_processing_time': total_processing_time * 1000,
             'files_per_second': files_per_second,
@@ -1701,8 +1598,7 @@ async def compare_folder_benchmark(
             shutil.copyfileobj(query_image.file, buffer)
         
         # クエリ画像の埋め込みベクトルを取得
-        selected_models = ['buffalo_l']
-        query_embeddings = get_embedding_multi_models(query_filename, use_detection=True, selected_models=selected_models)
+        query_embedding = get_embedding_buffalo(query_filename, use_detection=True)
         
         # ファイル保存処理
         file_info_list = await _save_files_individually(folder_images)
@@ -1715,11 +1611,11 @@ async def compare_folder_benchmark(
             # バッチ処理版
             optimal_batch_size = calculate_optimal_batch_size(len(valid_file_info_list))
             print(f"🚀 バッチ処理モード実行 (最適バッチサイズ: {optimal_batch_size})")
-            results = await _execute_comparison(query_embeddings, valid_file_info_list, selected_models, False, optimal_batch_size, 1, 100, start_time, query_filename)
+            results = await _execute_comparison_buffalo(query_embedding, valid_file_info_list, optimal_batch_size, comparison_start_time)
         else:
             # 非バッチ処理版
             print(f"🐌 非バッチ処理モード実行 (1ファイルずつ順次処理)")
-            results = await _execute_comparison_no_batch(query_embeddings, valid_file_info_list, selected_models, comparison_start_time, query_filename)
+            results = await _execute_comparison_no_batch(query_embedding, valid_file_info_list, comparison_start_time)
         
         comparison_time = time.time() - comparison_start_time
         total_time = time.time() - start_time
