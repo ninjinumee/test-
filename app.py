@@ -284,52 +284,40 @@ def compare_1vn_accuracy_page():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="1対N精度比較ページが見つかりません")
 
-# JAPANESE_FACE_v1 モデル設定
+# AuraFace モデル設定 (glintr100.onnxを使用)
 MODEL_CONFIG = {
-    "path": "JAPANESE_FACE_v1.onnx",
-    "name": "JAPANESE_FACE_v1",
-    "description": "GLint-R100データセットで訓練された高精度顔認識モデル（Apache 2.0ライセンス）",
-    "input_name": "x.1",
-    "input_size": (224, 224),
-    "output_name": "1170",
+    "path": "japanese_face_v1/glintr100.onnx",
+    "name": "AuraFace",
+    "description": "高精度顔認識モデル（AuraFace - glintr100）",
+    "input_name": "data",
+    "input_size": (112, 112),
+    "output_name": "1333",
     "embedding_size": 512
 }
 
 def initialize_model():
-    """JAPANESE_FACE_v1モデルを初期化（MediaPipe顔検出）"""
+    """AuraFaceモデルを初期化（MediaPipe顔検出）"""
     try:
-        # JAPANESE_FACE_v1必要ライブラリの確認
-        import torch
-        from huggingface_hub import snapshot_download
-        
-        print("🔄 JAPANESE_FACE_v1モデルをHuggingFaceからダウンロード中...")
-        
-        # HuggingFaceからJAPANESE_FACE_v1モデルをダウンロード
-        model_dir = snapshot_download(
-            repo_id="fal/JAPANESE_FACE_v1",
-            local_dir="./models/japanese_face_v1",
-            ignore_patterns=["*.md", "*.txt", "*.jpg", "*.png"]
-        )
-        print(f"✅ JAPANESE_FACE_v1モデルダウンロード完了: {model_dir}")
+        print("🔄 AuraFaceモデルを初期化中...")
         
         # プロバイダー設定
         providers = ['CPUExecutionProvider']
-        if torch.cuda.is_available():
-            providers.insert(0, 'CUDAExecutionProvider')
+        try:
+            import torch
+            if torch.cuda.is_available():
+                providers.insert(0, 'CUDAExecutionProvider')
+        except ImportError:
+            pass
         
-        # JAPANESE_FACE_v1認識モデルファイルのパス
-        model_path = os.path.join(model_dir, MODEL_CONFIG["path"])
+        # AuraFace認識モデルファイルのパス
+        model_path = os.path.join("models", MODEL_CONFIG["path"])
         
         if not os.path.exists(model_path):
-            # 利用可能なONNXファイルを検索
-            onnx_files = [f for f in os.listdir(model_dir) if f.endswith('.onnx') and 'glintr' in f]
-            if onnx_files:
-                model_path = os.path.join(model_dir, onnx_files[0])
-                print(f"🔍 発見されたJAPANESE_FACE_v1モデル: {onnx_files[0]}")
-            else:
-                raise FileNotFoundError(f"JAPANESE_FACE_v1認識モデルが見つかりません: {model_dir}")
+            print(f"❌ AuraFaceモデルファイルが見つかりません: {model_path}")
+            print("📁 利用可能なmodelsディレクトリを確認してください")
+            return None
         
-        # JAPANESE_FACE_v1認識モデルをONNX Runtimeで読み込み
+        # AuraFace認識モデルをONNX Runtimeで読み込み
         session = onnxruntime.InferenceSession(model_path, providers=providers)
         
         # MediaPipeベースのモデル構造を返す
@@ -340,16 +328,17 @@ def initialize_model():
         
         print(f"✅ {MODEL_CONFIG['name']} + MediaPipe 初期化完了")
         print(f"🔧 実行プロバイダー: {providers}")
+        print(f"📁 モデルパス: {model_path}")
         return model
         
     except Exception as e:
         print(f"❌ {MODEL_CONFIG['name']} 初期化エラー: {e}")
         return None
 
-# JAPANESE_FACE_v1モデルセッションを初期化
-japanese_face_v1_session = initialize_model()
+# AuraFaceモデルセッションを初期化
+auraface_session = initialize_model()
 
-print("🌟 JAPANESE_FACE_v1 + MediaPipe（Apache 2.0ライセンス）を使用します")
+print("🌟 AuraFace + MediaPipe を使用します")
 
 # Buffalo_l顔検出モデルの初期化
 BUFFALO_L_AVAILABLE = False  # グローバル変数として初期化
@@ -364,7 +353,7 @@ try:
     )
     # 小さい顔も検出できるよう、より小さいdet_sizeを使用
     buffalo_l_app.prepare(ctx_id=0, det_size=(224, 224))
-    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=224x224)")
+    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=112x112)")
     BUFFALO_L_AVAILABLE = True
 except Exception as e:
     print(f"⚠️ Buffalo_l顔検出モデル初期化失敗: {e}")
@@ -461,7 +450,7 @@ def detect_faces_buffalo_l(image):
 
 def get_embedding_with_mediapipe_detection(image):
     """MediaPipeで顔検出してJAPANESE_FACE_v1で埋め込みを取得"""
-    if not MEDIAPIPE_AVAILABLE or japanese_face_v1_session is None:
+    if not MEDIAPIPE_AVAILABLE or auraface_session is None:
         return None, None
     
     try:
@@ -477,8 +466,8 @@ def get_embedding_with_mediapipe_detection(image):
         # 顔領域を切り出し
         face_crop = image[y1:y2, x1:x2]
         
-        # 縦横比を保持して224x224にリサイズ
-        def resize_with_padding(img, target_size=(224, 224)):
+        # 縦横比を保持して112x112にリサイズ
+        def resize_with_padding(img, target_size=(112, 112)):
             h, w = img.shape[:2]
             target_w, target_h = target_size
             
@@ -495,7 +484,7 @@ def get_embedding_with_mediapipe_detection(image):
             
             return padded
         
-        aligned_face = resize_with_padding(face_crop, (224, 224))
+        aligned_face = resize_with_padding(face_crop, (112, 112))
         
         # 前処理：正規化とバッチ次元追加
         input_image = aligned_face.astype(np.float32) / 255.0
@@ -503,7 +492,7 @@ def get_embedding_with_mediapipe_detection(image):
         input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
         
         # ONNX推論実行
-        recognition_session = japanese_face_v1_session['recognition_session']
+        recognition_session = auraface_session['recognition_session']
         onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
         outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
         embedding = outputs[0][0]  # バッチ次元を削除
@@ -519,7 +508,7 @@ def get_embedding_with_mediapipe_detection(image):
 
 def get_embedding_with_buffalo_l_detection(image):
     """Buffalo_lで顔検出してJAPANESE_FACE_v1で埋め込みを取得"""
-    if not BUFFALO_L_AVAILABLE or japanese_face_v1_session is None:
+    if not BUFFALO_L_AVAILABLE or auraface_session is None:
         return None, None
     
     try:
@@ -535,8 +524,8 @@ def get_embedding_with_buffalo_l_detection(image):
         # 顔領域を切り出し
         face_crop = image[y1:y2, x1:x2]
         
-        # 縦横比を保持して224x224にリサイズ
-        def resize_with_padding(img, target_size=(224, 224)):
+        # 縦横比を保持して112x112にリサイズ
+        def resize_with_padding(img, target_size=(112, 112)):
             h, w = img.shape[:2]
             target_w, target_h = target_size
             
@@ -553,7 +542,7 @@ def get_embedding_with_buffalo_l_detection(image):
             
             return padded
         
-        aligned_face = resize_with_padding(face_crop, (224, 224))
+        aligned_face = resize_with_padding(face_crop, (112, 112))
         
         # 前処理：正規化とバッチ次元追加
         input_image = aligned_face.astype(np.float32) / 255.0
@@ -561,7 +550,7 @@ def get_embedding_with_buffalo_l_detection(image):
         input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
         
         # ONNX推論実行
-        recognition_session = japanese_face_v1_session['recognition_session']
+        recognition_session = auraface_session['recognition_session']
         onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
         outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
         embedding = outputs[0][0]  # バッチ次元を削除
@@ -609,7 +598,7 @@ def detect_and_align_face(image_path, detection_method="buffalo_l"):
         return None
 
 def detect_and_align_buffalo_l(image):
-    """Buffalo_l顔検出モデルによる顔検出とアライメント（224x224対応）"""
+    """Buffalo_l顔検出モデルによる顔検出とアライメント（112x112対応）"""
     if not BUFFALO_L_AVAILABLE or buffalo_l_app is None:
         print("⚠️ Buffalo_l顔検出モデルが利用できません")
         return None
@@ -705,8 +694,8 @@ def detect_and_align_buffalo_l(image):
         else:
             print(f"❌ 切り出し画像保存失敗: {debug_path}")
         
-        # 224x224にリサイズ
-        aligned_face = cv2.resize(face_crop, (224, 224))
+        # 112x112にリサイズ
+        aligned_face = cv2.resize(face_crop, (112, 112))
         
         # リサイズ後の顔も保存
         aligned_debug_path = f"static/temp/debug_aligned_{int(time.time())}.jpg"
@@ -804,7 +793,7 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
         available_memory_gb = 4.0  # デフォルト値
     
     # メモリに基づくバッチサイズ計算
-    # 各画像は約224x224x3x4 = 600KB、さらに前処理で2-3倍になると仮定
+    # 各画像は約112x112x3x4 = 600KB、さらに前処理で2-3倍になると仮定
     memory_per_image_mb = 0.5  # 保守的な見積もり
     max_batch_by_memory = int((available_memory_gb * 1024 * 0.3) / memory_per_image_mb)  # 利用可能メモリの30%を使用
     
@@ -829,7 +818,7 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
 
 def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     """バッチ処理による高速な特徴量抽出"""
-    if japanese_face_v1_session is None:
+    if auraface_session is None:
         return [], []
     
     # 自動バッチサイズ調整
@@ -837,7 +826,7 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
         batch_size = calculate_optimal_batch_size(len(file_paths))
     
     # 認識セッションを取得
-    recognition_session = japanese_face_v1_session['recognition_session']
+    recognition_session = auraface_session['recognition_session']
     input_name = MODEL_CONFIG["input_name"]
     
     all_embeddings = []
@@ -927,7 +916,7 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
 
 def get_embedding_japanese_face_v1_from_image(image, detection_method="mediapipe"):
     """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得（画像データから直接）"""
-    if japanese_face_v1_session is None:
+    if auraface_session is None:
         return None
     
     try:
@@ -947,7 +936,7 @@ def get_embedding_japanese_face_v1_from_image(image, detection_method="mediapipe
         input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
         
         # ONNX推論実行
-        recognition_session = japanese_face_v1_session['recognition_session']
+        recognition_session = auraface_session['recognition_session']
         onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
         outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
         embedding = outputs[0][0]  # バッチ次元を削除
@@ -964,7 +953,7 @@ def get_embedding_japanese_face_v1_from_image(image, detection_method="mediapipe
 
 def get_embedding_japanese_face_v1(file_path, use_detection=True, detection_method="buffalo_l"):
     """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得（Buffalo_l検出のみ）"""
-    if japanese_face_v1_session is None:
+    if auraface_session is None:
         return {
             'embedding': None,
             'error': 'JAPANESE_FACE_v1モデルが読み込まれていません',
@@ -1007,7 +996,7 @@ def get_embedding_japanese_face_v1(file_path, use_detection=True, detection_meth
         face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
         
         # JAPANESE_FACE_v1で埋め込みベクトル計算
-        recognition_session = japanese_face_v1_session['recognition_session']
+        recognition_session = auraface_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
         outputs = recognition_session.run(None, {input_name: face_aligned})
         embedding = outputs[0][0]
@@ -1032,7 +1021,7 @@ def get_embedding_japanese_face_v1(file_path, use_detection=True, detection_meth
 
 def get_embedding_single(file_path, use_detection=True):
     """単一ファイル処理（バッチ処理なし）"""
-    if japanese_face_v1_session is None:
+    if auraface_session is None:
         return None
     
     try:
@@ -1056,7 +1045,7 @@ def get_embedding_single(file_path, use_detection=True):
         face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
         
         # JAPANESE_FACE_v1で埋め込みベクトル計算
-        recognition_session = japanese_face_v1_session['recognition_session']
+        recognition_session = auraface_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
         outputs = recognition_session.run(None, {input_name: face_aligned})
         embedding = outputs[0][0]
@@ -2202,7 +2191,7 @@ async def compare_models(
     print(f"🆚 モデル比較開始: {file1.filename} vs {file2.filename}")
     print(f"🔍 検出方式: {detection_method}")
     print(f"🐃 Buffalo_l利用可能: {BUFFALO_L_AVAILABLE}")
-    print(f"🌟 JAPANESE_FACE_v1セッション: {japanese_face_v1_session is not None}")
+    print(f"🌟 JAPANESE_FACE_v1セッション: {auraface_session is not None}")
     
     try:
         # 画像読み込み
@@ -2272,7 +2261,7 @@ async def compare_models(
         # JAPANESE_FACE_v1 モデル比較
         japanese_start = time.time()
         try:
-            if japanese_face_v1_session:
+            if auraface_session:
                 # 指定された検出方式を使用
                 embedding1 = get_embedding_japanese_face_v1_from_image(image1, detection_method=detection_method)
                 embedding2 = get_embedding_japanese_face_v1_from_image(image2, detection_method=detection_method)
@@ -2419,7 +2408,7 @@ async def compare_models_folder(
         japanese_available = False
         
         try:
-            if japanese_face_v1_session:
+            if auraface_session:
                 # クエリ画像の埋め込み取得
                 query_embedding = get_embedding_japanese_face_v1_from_image(query_img, detection_method=detection_method)
                 if query_embedding is not None:
@@ -2545,8 +2534,8 @@ async def debug_face_detection(file: UploadFile = File(...)):
                 print(f"❌ 切り出し画像保存失敗: {crop_path}")
                 crop_path = None
             
-            # 縦横比を保持して224x224にリサイズ（パディング付き）
-            def resize_with_padding(img, target_size=(224, 224)):
+            # 縦横比を保持して112x112にリサイズ（パディング付き）
+            def resize_with_padding(img, target_size=(112, 112)):
                 h, w = img.shape[:2]
                 target_w, target_h = target_size
                 
@@ -2568,7 +2557,7 @@ async def debug_face_detection(file: UploadFile = File(...)):
                 
                 return padded
             
-            aligned_face = resize_with_padding(face_crop, (224, 224))
+            aligned_face = resize_with_padding(face_crop, (112, 112))
             aligned_path = f"static/temp/debug_aligned_{i}_{int(time.time())}.jpg"
             aligned_success = cv2.imwrite(aligned_path, aligned_face)
             if not aligned_success:
@@ -2623,7 +2612,7 @@ async def compare_face_detection(file: UploadFile = File(...)):
             print(f"🖼️  元画像を保存: {original_path}")
         
         # 縦横比を保持してリサイズする関数
-        def resize_with_padding(img, target_size=(224, 224)):
+        def resize_with_padding(img, target_size=(112, 112)):
             h, w = img.shape[:2]
             target_w, target_h = target_size
             
@@ -2678,8 +2667,8 @@ async def compare_face_detection(file: UploadFile = File(...)):
             crop_path = f"static/temp/mp_face_{i}_{int(time.time())}.jpg"
             crop_success = cv2.imwrite(crop_path, face_crop)
             
-            # 224x224リサイズ（縦横比保持）
-            aligned_face = resize_with_padding(face_crop, (224, 224))
+            # 112x112リサイズ（縦横比保持）
+            aligned_face = resize_with_padding(face_crop, (112, 112))
             aligned_path = f"static/temp/mp_aligned_{i}_{int(time.time())}.jpg"
             aligned_success = cv2.imwrite(aligned_path, aligned_face)
             
@@ -2705,8 +2694,8 @@ async def compare_face_detection(file: UploadFile = File(...)):
             crop_path = f"static/temp/bl_face_{i}_{int(time.time())}.jpg"
             crop_success = cv2.imwrite(crop_path, face_crop)
             
-            # 224x224リサイズ（縦横比保持）
-            aligned_face = resize_with_padding(face_crop, (224, 224))
+            # 112x112リサイズ（縦横比保持）
+            aligned_face = resize_with_padding(face_crop, (112, 112))
             aligned_path = f"static/temp/bl_aligned_{i}_{int(time.time())}.jpg"
             aligned_success = cv2.imwrite(aligned_path, aligned_face)
             

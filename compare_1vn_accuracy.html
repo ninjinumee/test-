@@ -175,7 +175,7 @@
     <div class="container">
         <h1>🔍 1対N顔検索 精度比較</h1>
         <p style="text-align: center; color: #666; margin-bottom: 30px;">
-            MediaPipe検出 vs Buffalo_l検出での認識精度を比較します（JAPANESE_FACE_v1モデル使用）
+            MediaPipe検出 vs Buffalo_l検出での認識精度を比較します（AuraFaceモデル使用）
         </p>
         
         <div class="upload-section">
@@ -313,7 +313,7 @@
             // MediaPipe結果
             html += `
                 <div class="method-result mediapipe">
-                    <h4>🟠 MediaPipe検出 + JAPANESE_FACE_v1認識</h4>
+                    <h4>🟠 MediaPipe検出 + AuraFace認識</h4>
             `;
             
             if (data.mediapipe.available) {
@@ -328,7 +328,7 @@
                         <p><strong>マッチ率:</strong> ${matches.length > 0 ? ((matchCount/matches.length)*100).toFixed(1) : 0}%</p>
                     </div>
                     
-                    <h5>マッチ結果 (上位20件)</h5>
+                    <h5>マッチ結果 (上位100件)</h5>
                     <table class="matches-table">
                         <tr>
                             <th>順位</th>
@@ -339,7 +339,7 @@
                         </tr>
                 `;
                 
-                matches.slice(0, 20).forEach((match, index) => {
+                matches.slice(0, 100).forEach((match, index) => {
                     const similarityClass = match.similarity > 0.8 ? 'similarity-high' : 
                                           match.similarity > 0.6 ? 'similarity-medium' : 'similarity-low';
                     
@@ -366,7 +366,7 @@
             // Buffalo_l結果
             html += `
                 <div class="method-result buffalo">
-                    <h4>🟢 Buffalo_l検出 + JAPANESE_FACE_v1認識</h4>
+                    <h4>🟢 Buffalo_l検出 + AuraFace認識</h4>
             `;
             
             if (data.buffalo_l.available) {
@@ -381,7 +381,7 @@
                         <p><strong>マッチ率:</strong> ${matches.length > 0 ? ((matchCount/matches.length)*100).toFixed(1) : 0}%</p>
                     </div>
                     
-                    <h5>マッチ結果 (上位20件)</h5>
+                    <h5>マッチ結果 (上位100件)</h5>
                     <table class="matches-table">
                         <tr>
                             <th>順位</th>
@@ -392,7 +392,7 @@
                         </tr>
                 `;
                 
-                matches.slice(0, 20).forEach((match, index) => {
+                matches.slice(0, 100).forEach((match, index) => {
                     const similarityClass = match.similarity > 0.8 ? 'similarity-high' : 
                                           match.similarity > 0.6 ? 'similarity-medium' : 'similarity-low';
                     

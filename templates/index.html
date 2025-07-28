@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>顔認証比較デモ (DeepFace vs ONNX ArcFace)</title>
+    <title>顔認証比較デモ (DeepFace vs AuraFace)</title>
     <style>
         .comparison { 
             display: grid; 
@@ -304,7 +304,7 @@
                         <p><strong>成功した比較:</strong> ${data.successful_comparisons.toLocaleString()}</p>
                         <p><strong>マッチした画像:</strong> ${data.matches_found.toLocaleString()}</p>
                         <p><strong>使用閾値:</strong> ${data.processing_summary.threshold_used}</p>
-                        <p><strong>使用モデル:</strong> ${data.processing_summary.model || 'Buffalo_l WebFace600K ResNet50'}</p>
+                        <p><strong>使用モデル:</strong> ${data.processing_summary.model || 'AuraFace (glintr100)'}</p>
                         ${data.total_results > 0 ? `<p><strong>表示結果:</strong> 全 ${data.total_results.toLocaleString()} 件表示</p>` : ''}
                         ${data.processing_summary.total_processing_time ? `<p><strong>総処理時間:</strong> ${(data.processing_summary.total_processing_time / 1000).toFixed(1)} 秒</p>` : ''}
                         ${data.processing_summary.files_per_second ? `<p><strong>処理速度:</strong> ${data.processing_summary.files_per_second.toFixed(1)} ファイル/秒</p>` : ''}
