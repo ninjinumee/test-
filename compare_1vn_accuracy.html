@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1対N顔検索 精度比較 (MediaPipe vs Buffalo_l)</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 5px;
+            background: #f8f9ff;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+        }
+        .stats-summary {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+        }
+        .stat-item {
+            text-align: center;
+            flex: 1;
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .comparison-container {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .method-result {
+            flex: 1;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            background: white;
+        }
+        .method-result.mediapipe {
+            border-left: 4px solid #ff9800;
+        }
+        .method-result.buffalo {
+            border-left: 4px solid #4caf50;
+        }
+        .matches-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .matches-table th,
+        .matches-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+            font-size: 14px;
+        }
+        .matches-table th {
+            background: #f5f5f5;
+            font-weight: bold;
+        }
+        .matches-table tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+        .similarity-high {
+            color: #4caf50;
+            font-weight: bold;
+        }
+        .similarity-medium {
+            color: #ff9800;
+            font-weight: bold;
+        }
+        .similarity-low {
+            color: #f44336;
+        }
+        .match-indicator {
+            font-weight: bold;
+        }
+        .match-yes {
+            color: #4caf50;
+        }
+        .match-no {
+            color: #f44336;
+        }
+        .performance-info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .error-msg {
+            background: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .progress {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 1対N顔検索 精度比較</h1>
+        <p style="text-align: center; color: #666; margin-bottom: 30px;">
+            MediaPipe検出 vs Buffalo_l検出での認識精度を比較します（JAPANESE_FACE_v1モデル使用）
+        </p>
+        
+        <div class="upload-section">
+            <h2>📋 画像アップロード</h2>
+            
+            <div class="form-group">
+                <label for="queryImage">クエリ画像（検索対象）:</label>
+                <input type="file" id="queryImage" accept="image/*" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="folderImages">比較対象画像（複数選択）:</label>
+                <input type="file" id="folderImages" accept="image/*" multiple required>
+                <small style="color: #666;">複数の画像を選択してください（Ctrl+クリック または Cmd+クリック）</small>
+            </div>
+            
+            <button onclick="compareAccuracy()">精度比較実行</button>
+        </div>
+        
+        <div class="progress" id="progress">
+            <p>処理中...</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p id="progressText">準備中...</p>
+        </div>
+        
+        <div id="results" class="results" style="display: none;">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        async function compareAccuracy() {
+            const queryInput = document.getElementById('queryImage');
+            const folderInput = document.getElementById('folderImages');
+            const resultsDiv = document.getElementById('results');
+            const resultContent = document.getElementById('resultContent');
+            const progressDiv = document.getElementById('progress');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            
+            if (!queryInput.files[0]) {
+                alert('クエリ画像を選択してください');
+                return;
+            }
+            
+            if (folderInput.files.length === 0) {
+                alert('比較対象画像を選択してください');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('query_image', queryInput.files[0]);
+            
+            // 複数のフォルダ画像を追加
+            for (let i = 0; i < folderInput.files.length; i++) {
+                formData.append('folder_images', folderInput.files[i]);
+            }
+            
+            try {
+                // プログレス表示
+                progressDiv.style.display = 'block';
+                resultsDiv.style.display = 'none';
+                progressText.textContent = `${folderInput.files.length}枚の画像を処理中...`;
+                
+                // プログレスバーアニメーション
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 2;
+                    if (progress <= 90) {
+                        progressFill.style.width = progress + '%';
+                    }
+                }, 100);
+                
+                const response = await fetch('/compare_1vn_accuracy', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                clearInterval(progressInterval);
+                progressFill.style.width = '100%';
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    progressDiv.style.display = 'none';
+                    displayResults(data);
+                } else {
+                    throw new Error(data.detail || '精度比較に失敗しました');
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                progressDiv.style.display = 'none';
+                resultContent.innerHTML = `<div class="error-msg">エラー: ${error.message}</div>`;
+                resultsDiv.style.display = 'block';
+            }
+        }
+        
+        function displayResults(data) {
+            const resultContent = document.getElementById('resultContent');
+            
+            let html = `
+                <h3>🔍 精度比較結果: ${data.query_filename}</h3>
+                
+                <!-- 統計サマリー -->
+                <div class="stats-summary">
+                    <div class="stat-item">
+                        <div class="stat-value">${data.total_images}</div>
+                        <div>総画像数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.mediapipe.matches.filter(m => m.is_match).length}</div>
+                        <div>MediaPipeマッチ数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.buffalo_l.matches.filter(m => m.is_match).length}</div>
+                        <div>Buffalo_lマッチ数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.mediapipe.available ? '✅' : '❌'}</div>
+                        <div>MediaPipe状態</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.buffalo_l.available ? '✅' : '❌'}</div>
+                        <div>Buffalo_l状態</div>
+                    </div>
+                </div>
+            `;
+            
+            // 比較結果コンテナ
+            html += '<div class="comparison-container">';
+            
+            // MediaPipe結果
+            html += `
+                <div class="method-result mediapipe">
+                    <h4>🟠 MediaPipe検出 + JAPANESE_FACE_v1認識</h4>
+            `;
+            
+            if (data.mediapipe.available) {
+                const matches = data.mediapipe.matches;
+                const matchCount = matches.filter(m => m.is_match).length;
+                
+                html += `
+                    <div class="performance-info">
+                        <p><strong>クエリ信頼度:</strong> ${(data.mediapipe.query_confidence * 100).toFixed(1)}%</p>
+                        <p><strong>処理時間:</strong> ${data.mediapipe.processing_time_ms.toFixed(1)}ms</p>
+                        <p><strong>マッチ数:</strong> ${matchCount}/${matches.length}</p>
+                        <p><strong>マッチ率:</strong> ${matches.length > 0 ? ((matchCount/matches.length)*100).toFixed(1) : 0}%</p>
+                    </div>
+                    
+                    <h5>マッチ結果 (上位20件)</h5>
+                    <table class="matches-table">
+                        <tr>
+                            <th>順位</th>
+                            <th>ファイル名</th>
+                            <th>類似度</th>
+                            <th>信頼度</th>
+                            <th>マッチ</th>
+                        </tr>
+                `;
+                
+                matches.slice(0, 20).forEach((match, index) => {
+                    const similarityClass = match.similarity > 0.8 ? 'similarity-high' : 
+                                          match.similarity > 0.6 ? 'similarity-medium' : 'similarity-low';
+                    
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${match.filename}</td>
+                            <td class="${similarityClass}">${(match.similarity * 100).toFixed(1)}%</td>
+                            <td>${(match.confidence * 100).toFixed(1)}%</td>
+                            <td class="match-indicator ${match.is_match ? 'match-yes' : 'match-no'}">
+                                ${match.is_match ? '✅ マッチ' : '❌ 非マッチ'}
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</table>';
+            } else {
+                html += '<div class="error-msg">MediaPipeが利用できません</div>';
+            }
+            
+            html += '</div>';
+            
+            // Buffalo_l結果
+            html += `
+                <div class="method-result buffalo">
+                    <h4>🟢 Buffalo_l検出 + JAPANESE_FACE_v1認識</h4>
+            `;
+            
+            if (data.buffalo_l.available) {
+                const matches = data.buffalo_l.matches;
+                const matchCount = matches.filter(m => m.is_match).length;
+                
+                html += `
+                    <div class="performance-info">
+                        <p><strong>クエリ信頼度:</strong> ${(data.buffalo_l.query_confidence * 100).toFixed(1)}%</p>
+                        <p><strong>処理時間:</strong> ${data.buffalo_l.processing_time_ms.toFixed(1)}ms</p>
+                        <p><strong>マッチ数:</strong> ${matchCount}/${matches.length}</p>
+                        <p><strong>マッチ率:</strong> ${matches.length > 0 ? ((matchCount/matches.length)*100).toFixed(1) : 0}%</p>
+                    </div>
+                    
+                    <h5>マッチ結果 (上位20件)</h5>
+                    <table class="matches-table">
+                        <tr>
+                            <th>順位</th>
+                            <th>ファイル名</th>
+                            <th>類似度</th>
+                            <th>信頼度</th>
+                            <th>マッチ</th>
+                        </tr>
+                `;
+                
+                matches.slice(0, 20).forEach((match, index) => {
+                    const similarityClass = match.similarity > 0.8 ? 'similarity-high' : 
+                                          match.similarity > 0.6 ? 'similarity-medium' : 'similarity-low';
+                    
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${match.filename}</td>
+                            <td class="${similarityClass}">${(match.similarity * 100).toFixed(1)}%</td>
+                            <td>${(match.confidence * 100).toFixed(1)}%</td>
+                            <td class="match-indicator ${match.is_match ? 'match-yes' : 'match-no'}">
+                                ${match.is_match ? '✅ マッチ' : '❌ 非マッチ'}
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</table>';
+            } else {
+                html += '<div class="error-msg">Buffalo_lが利用できません</div>';
+            }
+            
+            html += '</div>';
+            html += '</div>'; // comparison-container終了
+            
+            // 比較考察
+            if (data.mediapipe.available && data.buffalo_l.available) {
+                const mpTime = data.mediapipe.processing_time_ms;
+                const blTime = data.buffalo_l.processing_time_ms;
+                const mpMatches = data.mediapipe.matches.filter(m => m.is_match).length;
+                const blMatches = data.buffalo_l.matches.filter(m => m.is_match).length;
+                
+                html += `
+                    <div style="margin-top: 20px; padding: 20px; background: #f5f5f5; border-radius: 10px;">
+                        <h4>📊 比較考察</h4>
+                        <ul>
+                            <li><strong>マッチ数:</strong> MediaPipe: ${mpMatches}件, Buffalo_l: ${blMatches}件</li>
+                            <li><strong>処理時間:</strong> MediaPipe: ${mpTime.toFixed(1)}ms, Buffalo_l: ${blTime.toFixed(1)}ms</li>
+                            <li><strong>速度差:</strong> ${mpTime > blTime ? 'Buffalo_l' : 'MediaPipe'}が${Math.abs(mpTime - blTime).toFixed(1)}ms高速</li>
+                            <li><strong>精度傾向:</strong> ${mpMatches > blMatches ? 'MediaPipe' : blMatches > mpMatches ? 'Buffalo_l' : '同程度'}の方が多くマッチを検出</li>
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            resultContent.innerHTML = html;
+            document.getElementById('results').style.display = 'block';
+        }
+    </script>
+</body>
+</html>

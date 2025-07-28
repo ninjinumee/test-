@@ -101,7 +101,6 @@ import uuid
 import shutil
 from fastapi.staticfiles import StaticFiles
 import cv2
-import mediapipe as mp
 import asyncio
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -109,6 +108,7 @@ import multiprocessing
 import gc
 import time
 from functools import partial
+import mediapipe as mp
 
 # Try to import psutil, fall back to basic monitoring if not available
 try:
@@ -200,9 +200,23 @@ class LargeFileMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             return response
         except Exception as e:
-            print(f"❌ ミドルウェアエラー: {e}")
+            print(f"❌ ミドルウェアエラー: {type(e).__name__}: {e}")
+            # より詳細なエラー情報をログ出力
+            import traceback
+            traceback.print_exc()
+            
+            # より安全なエラーハンドリング
+            try:
+                error_msg = str(e)
+            except:
+                error_msg = f"{type(e).__name__}: エラーの文字列化に失敗"
+            
             from fastapi import HTTPException
-            raise HTTPException(status_code=500, detail=f"サーバーエラー: {str(e)}")
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=500,
+                content={"error": "サーバー内部エラーが発生しました", "detail": error_msg}
+            )
 
 app.add_middleware(LargeFileMiddleware)
 
@@ -228,6 +242,48 @@ def benchmark_test():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="ベンチマークテストページが見つかりません")
 
+# モデル比較ページのルート追加
+@app.get("/model_comparison.html", response_class=HTMLResponse)
+def model_comparison():
+    """モデル比較ページを配信"""
+    try:
+        with open("model_comparison.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="モデル比較ページが見つかりません")
+
+# 顔検知デバッグページのルート追加
+@app.get("/debug_face.html", response_class=HTMLResponse)
+def debug_face():
+    """顔検知デバッグページを配信"""
+    try:
+        with open("debug_face.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="顔検知デバッグページが見つかりません")
+
+@app.get("/compare_detection.html", response_class=HTMLResponse)
+def compare_detection():
+    """顔検知比較ページを配信"""
+    try:
+        with open("compare_detection.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="顔検知比較ページが見つかりません")
+
+@app.get("/compare_1vn_accuracy.html", response_class=HTMLResponse)
+def compare_1vn_accuracy_page():
+    """1対N精度比較ページを配信"""
+    try:
+        with open("compare_1vn_accuracy.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="1対N精度比較ページが見つかりません")
+
 # JAPANESE_FACE_v1 モデル設定
 MODEL_CONFIG = {
     "path": "JAPANESE_FACE_v1.onnx",
@@ -235,7 +291,7 @@ MODEL_CONFIG = {
     "description": "GLint-R100データセットで訓練された高精度顔認識モデル（Apache 2.0ライセンス）",
     "input_name": "x.1",
     "input_size": (224, 224),
-    "output_name": "fc1",
+    "output_name": "1170",
     "embedding_size": 512
 }
 
@@ -295,61 +351,229 @@ japanese_face_v1_session = initialize_model()
 
 print("🌟 JAPANESE_FACE_v1 + MediaPipe（Apache 2.0ライセンス）を使用します")
 
-# MediaPipe face detection and landmarks
-mp_face_detection = mp.solutions.face_detection
-mp_face_mesh = mp.solutions.face_mesh
-mp_drawing = mp.solutions.drawing_utils
+# Buffalo_l顔検出モデルの初期化
+BUFFALO_L_AVAILABLE = False  # グローバル変数として初期化
+buffalo_l_app = None
 
-def detect_and_align_mediapipe(image):
-    """MediaPipeを使用した顔検出とアライメント"""
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
+try:
+    import insightface
+    # 検出のみに特化してリソースを節約
+    buffalo_l_app = insightface.app.FaceAnalysis(
+        name='buffalo_l',
+        allowed_modules=['detection', 'recognition']  # 検出と認識のみ有効化
+    )
+    # 小さい顔も検出できるよう、より小さいdet_sizeを使用
+    buffalo_l_app.prepare(ctx_id=0, det_size=(224, 224))
+    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=224x224)")
+    BUFFALO_L_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ Buffalo_l顔検出モデル初期化失敗: {e}")
+    buffalo_l_app = None
+    BUFFALO_L_AVAILABLE = False
+
+# MediaPipe顔検出の初期化（比較用）
+print("🔧 MediaPipe顔検出を初期化中...")
+try:
+    mp_face_detection = mp.solutions.face_detection
+    mp_drawing = mp.solutions.drawing_utils
+    face_detection = mp_face_detection.FaceDetection(
+        model_selection=0,  # 0: 短距離モデル（2m以内）, 1: 長距離モデル（5m以内）
         min_detection_confidence=0.5
-    ) as face_mesh:
-        # RGB変換
+    )
+    print("✅ MediaPipe顔検出初期化完了")
+    MEDIAPIPE_AVAILABLE = True
+except Exception as e:
+    print(f"❌ MediaPipe顔検出初期化エラー: {e}")
+    face_detection = None
+    MEDIAPIPE_AVAILABLE = False
+
+def detect_faces_mediapipe(image):
+    """MediaPipeで顔検出を行う関数"""
+    if not MEDIAPIPE_AVAILABLE:
+        return []
+    
+    try:
+        # BGR -> RGB変換
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
         
-        if not results.multi_face_landmarks:
-            return None
+        # 顔検出実行
+        results = face_detection.process(rgb_image)
         
-        landmarks = results.multi_face_landmarks[0]
-        h, w = image.shape[:2]
+        faces = []
+        if results.detections is not None and len(results.detections) > 0:
+            for detection in results.detections:
+                # バウンディングボックスを取得
+                bbox = detection.location_data.relative_bounding_box
+                h, w, _ = image.shape
+                
+                # 相対座標を絶対座標に変換
+                x1 = int(bbox.xmin * w)
+                y1 = int(bbox.ymin * h)
+                x2 = int((bbox.xmin + bbox.width) * w)
+                y2 = int((bbox.ymin + bbox.height) * h)
+                
+                # 画像境界内に制限
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(w, x2)
+                y2 = min(h, y2)
+                
+                face_info = {
+                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                    'confidence': float(detection.score[0]),
+                    'detection_method': 'mediapipe'
+                }
+                faces.append(face_info)
         
-        # 5つのキーポイントを抽出（目、鼻、口の端）
-        # MediaPipe landmark indices for face alignment
-        left_eye_idx = 33
-        right_eye_idx = 263
-        nose_idx = 1
-        left_mouth_idx = 61
-        right_mouth_idx = 291
+        return faces
+    except Exception as e:
+        print(f"❌ MediaPipe顔検出エラー: {e}")
+        return []
+
+def detect_faces_buffalo_l(image):
+    """Buffalo_lで顔検出を行う関数"""
+    if not BUFFALO_L_AVAILABLE:
+        return []
+    
+    try:
+        # BGR -> RGB変換
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        keypoints = np.array([
-            [landmarks.landmark[left_eye_idx].x * w, landmarks.landmark[left_eye_idx].y * h],
-            [landmarks.landmark[right_eye_idx].x * w, landmarks.landmark[right_eye_idx].y * h],
-            [landmarks.landmark[nose_idx].x * w, landmarks.landmark[nose_idx].y * h],
-            [landmarks.landmark[left_mouth_idx].x * w, landmarks.landmark[left_mouth_idx].y * h],
-            [landmarks.landmark[right_mouth_idx].x * w, landmarks.landmark[right_mouth_idx].y * h]
-        ], dtype=np.float32)
+        # 顔検出実行
+        faces_data = buffalo_l_app.get(rgb_image)
         
-        # アライメント用の標準5点座標（224x224用）
-        dst_points = np.array([
-            [76.5892, 103.3926],
-            [147.0636, 103.0028],
-            [112.0504, 143.4732],
-            [83.0986, 184.731],
-            [141.4598, 184.4082]
-        ], dtype=np.float32)
+        faces = []
+        for face in faces_data:
+            bbox = face.bbox.astype(int)
+            x1, y1, x2, y2 = bbox
+            
+            face_info = {
+                'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                'confidence': float(face.det_score),
+                'detection_method': 'buffalo_l'
+            }
+            faces.append(face_info)
         
-        # アフィン変換行列を計算
-        tform = cv2.estimateAffinePartial2D(keypoints, dst_points)[0]
+        return faces
+    except Exception as e:
+        print(f"❌ Buffalo_l顔検出エラー: {e}")
+        return []
+
+def get_embedding_with_mediapipe_detection(image):
+    """MediaPipeで顔検出してJAPANESE_FACE_v1で埋め込みを取得"""
+    if not MEDIAPIPE_AVAILABLE or japanese_face_v1_session is None:
+        return None, None
+    
+    try:
+        # MediaPipeで顔検出
+        mediapipe_faces = detect_faces_mediapipe(image)
+        if not mediapipe_faces:
+            return None, None
         
-        # 顔画像をアライメント
-        aligned_face = cv2.warpAffine(image, tform, (224, 224))
+        # 最初の顔を使用（信頼度が最も高い顔を選択）
+        best_face = max(mediapipe_faces, key=lambda x: x['confidence'])
+        x1, y1, x2, y2 = best_face['bbox']
         
-        return aligned_face
+        # 顔領域を切り出し
+        face_crop = image[y1:y2, x1:x2]
+        
+        # 縦横比を保持して224x224にリサイズ
+        def resize_with_padding(img, target_size=(224, 224)):
+            h, w = img.shape[:2]
+            target_w, target_h = target_size
+            
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            resized = cv2.resize(img, (new_w, new_h))
+            
+            padded = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            y_offset = (target_h - new_h) // 2
+            x_offset = (target_w - new_w) // 2
+            padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+            
+            return padded
+        
+        aligned_face = resize_with_padding(face_crop, (224, 224))
+        
+        # 前処理：正規化とバッチ次元追加
+        input_image = aligned_face.astype(np.float32) / 255.0
+        input_image = np.transpose(input_image, (2, 0, 1))  # HWC -> CHW
+        input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
+        
+        # ONNX推論実行
+        recognition_session = japanese_face_v1_session['recognition_session']
+        onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
+        outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
+        embedding = outputs[0][0]  # バッチ次元を削除
+        
+        # L2正規化
+        embedding = embedding / np.linalg.norm(embedding)
+        
+        return embedding, best_face['confidence']
+        
+    except Exception as e:
+        print(f"❌ MediaPipe+JAPANESE_FACE_v1埋め込み取得エラー: {e}")
+        return None, None
+
+def get_embedding_with_buffalo_l_detection(image):
+    """Buffalo_lで顔検出してJAPANESE_FACE_v1で埋め込みを取得"""
+    if not BUFFALO_L_AVAILABLE or japanese_face_v1_session is None:
+        return None, None
+    
+    try:
+        # Buffalo_lで顔検出
+        buffalo_faces = detect_faces_buffalo_l(image)
+        if not buffalo_faces:
+            return None, None
+        
+        # 最初の顔を使用（信頼度が最も高い顔を選択）
+        best_face = max(buffalo_faces, key=lambda x: x['confidence'])
+        x1, y1, x2, y2 = best_face['bbox']
+        
+        # 顔領域を切り出し
+        face_crop = image[y1:y2, x1:x2]
+        
+        # 縦横比を保持して224x224にリサイズ
+        def resize_with_padding(img, target_size=(224, 224)):
+            h, w = img.shape[:2]
+            target_w, target_h = target_size
+            
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            resized = cv2.resize(img, (new_w, new_h))
+            
+            padded = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            y_offset = (target_h - new_h) // 2
+            x_offset = (target_w - new_w) // 2
+            padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+            
+            return padded
+        
+        aligned_face = resize_with_padding(face_crop, (224, 224))
+        
+        # 前処理：正規化とバッチ次元追加
+        input_image = aligned_face.astype(np.float32) / 255.0
+        input_image = np.transpose(input_image, (2, 0, 1))  # HWC -> CHW
+        input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
+        
+        # ONNX推論実行
+        recognition_session = japanese_face_v1_session['recognition_session']
+        onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
+        outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
+        embedding = outputs[0][0]  # バッチ次元を削除
+        
+        # L2正規化
+        embedding = embedding / np.linalg.norm(embedding)
+        
+        return embedding, best_face['confidence']
+        
+    except Exception as e:
+        print(f"❌ Buffalo_l+JAPANESE_FACE_v1埋め込み取得エラー: {e}")
+        return None, None
 
 def enhance_image_quality(image):
     """画像品質の向上処理"""
@@ -364,119 +588,148 @@ def enhance_image_quality(image):
     
     return sharpened
 
-def get_face_landmarks(image):
-    """顔のランドマークを取得"""
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
-    ) as face_mesh:
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
-        
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0]
-            h, w = image.shape[:2]
-            
-            # 重要なランドマーク（目、鼻、口の中心）を取得
-            left_eye = landmarks.landmark[33]  # 左目の中心
-            right_eye = landmarks.landmark[263]  # 右目の中心
-            nose_tip = landmarks.landmark[1]    # 鼻先
-            
-            # ピクセル座標に変換
-            left_eye_point = (int(left_eye.x * w), int(left_eye.y * h))
-            right_eye_point = (int(right_eye.x * w), int(right_eye.y * h))
-            nose_point = (int(nose_tip.x * w), int(nose_tip.y * h))
-            
-            return left_eye_point, right_eye_point, nose_point
-    
-    return None
+# MediaPipe関数削除完了
 
-def align_face(image, landmarks):
-    """顔のアライメント（回転補正）"""
-    if landmarks is None:
-        return image
-    
-    left_eye, right_eye, nose = landmarks
-    
-    # 目の角度を計算
-    eye_center = ((left_eye[0] + right_eye[0]) // 2, (left_eye[1] + right_eye[1]) // 2)
-    dy = right_eye[1] - left_eye[1]
-    dx = right_eye[0] - left_eye[0]
-    angle = np.degrees(np.arctan2(dy, dx))
-    
-    # 回転行列を作成
-    h, w = image.shape[:2]
-    rotation_matrix = cv2.getRotationMatrix2D(eye_center, angle, 1.0)
-    
-    # 画像を回転
-    aligned_image = cv2.warpAffine(image, rotation_matrix, (w, h), flags=cv2.INTER_CUBIC)
-    
-    return aligned_image
-
-def detect_and_align_face(image_path):
-    """改善された顔検出・アライメント処理"""
+def detect_and_align_face(image_path, detection_method="buffalo_l"):
+    """Buffalo_lのみを使用した顔検出・アライメント処理"""
     image = cv2.imread(image_path)
     if image is None:
         return None
     
-    # 画像品質の向上
-    enhanced_image = enhance_image_quality(image)
-    
-    # まず顔のランドマークを取得してアライメント
-    landmarks = get_face_landmarks(enhanced_image)
-    if landmarks:
-        aligned_image = align_face(enhanced_image, landmarks)
+    # Buffalo_l検出のみ使用
+    if BUFFALO_L_AVAILABLE:
+        buffalo_result = detect_and_align_buffalo_l(image)
+        if buffalo_result is not None:
+            return buffalo_result
+        else:
+            print("⚠️ Buffalo_l検出失敗")
+            return None
     else:
-        aligned_image = enhanced_image
-    
-    # 顔検出
-    with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.3) as face_detection:
-        rgb_image = cv2.cvtColor(aligned_image, cv2.COLOR_BGR2RGB)
-        results = face_detection.process(rgb_image)
-        
-        if results.detections:
-            # 最も信頼度の高い顔を選択
-            best_detection = max(results.detections, key=lambda x: x.score[0])
-            bbox = best_detection.location_data.relative_bounding_box
-            
-            h, w, _ = aligned_image.shape
-            x = int(bbox.xmin * w)
-            y = int(bbox.ymin * h)
-            width = int(bbox.width * w)
-            height = int(bbox.height * h)
-            
-            # より保守的なマージン設定
-            margin = 0.15
-            x = max(0, int(x - width * margin))
-            y = max(0, int(y - height * margin))
-            width = min(w - x, int(width * (1 + 2 * margin)))
-            height = min(h - y, int(height * (1 + 2 * margin)))
-            
-            # 正方形に近づける（ArcFaceモデルの期待する形状）
-            if width != height:
-                size = max(width, height)
-                center_x = x + width // 2
-                center_y = y + height // 2
-                x = max(0, center_x - size // 2)
-                y = max(0, center_y - size // 2)
-                x = min(w - size, x)
-                y = min(h - size, y)
-                width = height = min(size, w - x, h - y)
-            
-            face_image = aligned_image[y:y+height, x:x+width]
-            return face_image
-    
-    return aligned_image  # 顔が検出されない場合はアライメント済み画像を返す
+        print("❌ Buffalo_lが利用できません")
+        return None
 
-def preprocess_image_for_model(file_path, use_detection=True):
+def detect_and_align_buffalo_l(image):
+    """Buffalo_l顔検出モデルによる顔検出とアライメント（224x224対応）"""
+    if not BUFFALO_L_AVAILABLE or buffalo_l_app is None:
+        print("⚠️ Buffalo_l顔検出モデルが利用できません")
+        return None
+    
+    try:
+        # BGR -> RGB変換（OpenCVとInsightFaceの違い対応）
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            rgb_image = image
+        
+        # 画像サイズ情報を表示
+        print(f"🔍 画像サイズ: {image.shape}, RGB画像サイズ: {rgb_image.shape}")
+        
+        # 画像サイズ最適化
+        original_shape = rgb_image.shape[:2]
+        
+        # 小さすぎる画像は拡大（最小256px）
+        if min(rgb_image.shape[:2]) < 256:
+            scale_up = 256 / min(rgb_image.shape[:2])
+            new_h, new_w = int(rgb_image.shape[0] * scale_up), int(rgb_image.shape[1] * scale_up)
+            rgb_image = cv2.resize(rgb_image, (new_w, new_h))
+            print(f"🔧 画像拡大: {original_shape} → {new_w}x{new_h}")
+        
+        # 大きすぎる画像は縮小（最大512px）
+        elif max(rgb_image.shape[:2]) > 512:
+            scale_down = 512 / max(rgb_image.shape[:2])
+            new_h, new_w = int(rgb_image.shape[0] * scale_down), int(rgb_image.shape[1] * scale_down)
+            rgb_image = cv2.resize(rgb_image, (new_w, new_h))
+            print(f"🔧 画像縮小: {original_shape} → {new_w}x{new_h}")
+        
+        # 画像の品質改善
+        rgb_image = cv2.bilateralFilter(rgb_image, 9, 75, 75)
+        
+        # Buffalo_lで顔を検出（複数の試行）
+        faces = []
+        
+        # 1回目: 通常検出
+        try:
+            faces = buffalo_l_app.get(rgb_image)
+            if len(faces) > 0:
+                print(f"✅ Buffalo_l: {len(faces)}個の顔を検出")
+        except Exception as e:
+            print(f"❌ Buffalo_l検出エラー: {e}")
+        
+        # 2回目: より小さいサイズで検出を試行
+        if len(faces) == 0:
+            print("🔄 より小さいサイズで再検出を試行...")
+            small_h, small_w = max(128, rgb_image.shape[0]//2), max(128, rgb_image.shape[1]//2)
+            small_image = cv2.resize(rgb_image, (small_w, small_h))
+            try:
+                small_faces = buffalo_l_app.get(small_image)
+                if len(small_faces) > 0:
+                    # 座標を元のサイズにスケール
+                    scale_factor = min(rgb_image.shape[:2]) / min(small_image.shape[:2])
+                    for face in small_faces:
+                        face.bbox = face.bbox * scale_factor
+                    faces = small_faces
+                    print(f"✅ 小サイズ検出成功: {len(faces)}個の顔")
+            except Exception as e:
+                print(f"❌ 小サイズ検出エラー: {e}")
+        
+        if len(faces) == 0:
+            print("⚠️ Buffalo_l: 全ての試行で顔が検出されませんでした")
+            return None
+        
+        # 最も信頼度の高い顔を選択
+        best_face = max(faces, key=lambda x: x.det_score)
+        
+        # バウンディングボックスを取得
+        bbox = best_face.bbox.astype(int)
+        x1, y1, x2, y2 = bbox
+        
+        # バウンディングボックスを少し広げる（顔全体を含むため）
+        margin = 20
+        h, w = image.shape[:2]
+        x1 = max(0, x1 - margin)
+        y1 = max(0, y1 - margin)
+        x2 = min(w, x2 + margin)
+        y2 = min(h, y2 + margin)
+        
+        # 顔領域を切り出し
+        face_crop = image[y1:y2, x1:x2]
+        
+        # デバッグ用: 切り出した顔を保存
+        import os
+        os.makedirs("static/temp", exist_ok=True)
+        
+        debug_path = f"static/temp/debug_face_{int(time.time())}.jpg"
+        success = cv2.imwrite(debug_path, face_crop)
+        if success:
+            print(f"🖼️  切り出した顔を保存: {debug_path}")
+        else:
+            print(f"❌ 切り出し画像保存失敗: {debug_path}")
+        
+        # 224x224にリサイズ
+        aligned_face = cv2.resize(face_crop, (224, 224))
+        
+        # リサイズ後の顔も保存
+        aligned_debug_path = f"static/temp/debug_aligned_{int(time.time())}.jpg"
+        success = cv2.imwrite(aligned_debug_path, aligned_face)
+        if success:
+            print(f"🖼️  アライメント後の顔を保存: {aligned_debug_path}")
+        else:
+            print(f"❌ アライメント画像保存失敗: {aligned_debug_path}")
+        
+        print(f"✅ Buffalo_l顔検出成功: 信頼度={best_face.det_score:.3f}, bbox=({x1},{y1},{x2},{y2})")
+        return aligned_face
+        
+    except Exception as e:
+        print(f"❌ Buffalo_l顔検出エラー: {e}")
+        return None
+
+def preprocess_image_for_model(file_path, use_detection=True, detection_method="mediapipe"):
     """Buffalo_lモデル用の前処理"""
     input_size = MODEL_CONFIG["input_size"]
     
     if use_detection:
-        # 顔検出とクロップ
-        face_image = detect_and_align_face(file_path)
+        # 顔検出とクロップ（検出方法選択可能）
+        face_image = detect_and_align_face(file_path, detection_method)
         if face_image is None:
             return None
         
@@ -621,8 +874,8 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
                     if img is None:
                         continue
                         
-                    # MediaPipeで顔検出とアライメント
-                    face_aligned = detect_and_align_mediapipe(img)
+                    # Buffalo_lで顔検出とアライメント
+                    face_aligned = detect_and_align_buffalo_l(img)
                     if face_aligned is None:
                         continue
                     
@@ -672,8 +925,45 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     print(f"✅ バッチ処理完了: {len(all_embeddings)}個の埋め込みベクトル生成")
     return all_embeddings, all_valid_indices
 
-def get_embedding_japanese_face_v1(file_path, use_detection=True):
-    """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得"""
+def get_embedding_japanese_face_v1_from_image(image, detection_method="mediapipe"):
+    """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得（画像データから直接）"""
+    if japanese_face_v1_session is None:
+        return None
+    
+    try:
+        # Buffalo_lのみで顔を検出・アライメント
+        if BUFFALO_L_AVAILABLE:
+            aligned_face = detect_and_align_buffalo_l(image)
+        else:
+            print("❌ Buffalo_lが利用できません")
+            return None
+        
+        if aligned_face is None:
+            return None
+        
+        # 前処理：正規化とバッチ次元追加
+        input_image = aligned_face.astype(np.float32) / 255.0
+        input_image = np.transpose(input_image, (2, 0, 1))  # HWC -> CHW
+        input_image = np.expand_dims(input_image, axis=0)   # バッチ次元追加
+        
+        # ONNX推論実行
+        recognition_session = japanese_face_v1_session['recognition_session']
+        onnx_inputs = {MODEL_CONFIG["input_name"]: input_image}
+        outputs = recognition_session.run([MODEL_CONFIG["output_name"]], onnx_inputs)
+        embedding = outputs[0][0]  # バッチ次元を削除
+        
+        # L2正規化
+        embedding = embedding / np.linalg.norm(embedding)
+        
+        # float32形式で返す
+        return np.asarray(embedding, dtype=np.float32)
+        
+    except Exception as e:
+        print(f"❌ JAPANESE_FACE_v1埋め込み生成エラー: {e}")
+        return None
+
+def get_embedding_japanese_face_v1(file_path, use_detection=True, detection_method="buffalo_l"):
+    """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得（Buffalo_l検出のみ）"""
     if japanese_face_v1_session is None:
         return {
             'embedding': None,
@@ -694,8 +984,14 @@ def get_embedding_japanese_face_v1(file_path, use_detection=True):
                 'processing_time': 0
             }
         
-        # MediaPipeで顔検出とアライメント
-        face_aligned = detect_and_align_mediapipe(img)
+        # 顔検出とアライメント（検出方法選択可能）
+        if detection_method == "buffalo_l" and BUFFALO_L_AVAILABLE:
+            face_aligned = detect_and_align_buffalo_l(img)
+            if face_aligned is None:
+                print("⚠️ Buffalo_l検出失敗、MediaPipeにフォールバック")
+                face_aligned = detect_and_align_buffalo_l(img)
+        else:
+            face_aligned = detect_and_align_buffalo_l(img)
         
         if face_aligned is None:
             return {
@@ -747,8 +1043,8 @@ def get_embedding_single(file_path, use_detection=True):
         if img is None:
             return None
         
-        # MediaPipeで顔検出とアライメント
-        face_aligned = detect_and_align_mediapipe(img)
+        # Buffalo_lで顔検出とアライメント
+        face_aligned = detect_and_align_buffalo_l(img)
         
         if face_aligned is None:
             return None
@@ -1895,3 +2191,681 @@ async def compare_folder(
     # すべてのファイルをシンプルな順次処理で実行
     print(f"📋 シンプル処理実行: {len(folder_images)}ファイル")
     return await compare_folder_internal(query_image, folder_images)
+
+@app.post("/compare_models")
+async def compare_models(
+    file1: UploadFile = File(...),
+    file2: UploadFile = File(...),
+    detection_method: str = Form("mediapipe")  # "mediapipe" または "buffalo_l"
+):
+    """Buffalo_l vs JAPANESE_FACE_v1 モデル比較 (1対1)"""
+    print(f"🆚 モデル比較開始: {file1.filename} vs {file2.filename}")
+    print(f"🔍 検出方式: {detection_method}")
+    print(f"🐃 Buffalo_l利用可能: {BUFFALO_L_AVAILABLE}")
+    print(f"🌟 JAPANESE_FACE_v1セッション: {japanese_face_v1_session is not None}")
+    
+    try:
+        # 画像読み込み
+        image1_data = await file1.read()
+        image2_data = await file2.read()
+        
+        image1 = np.frombuffer(image1_data, np.uint8)
+        image2 = np.frombuffer(image2_data, np.uint8)
+        
+        image1 = cv2.imdecode(image1, cv2.IMREAD_COLOR)
+        image2 = cv2.imdecode(image2, cv2.IMREAD_COLOR)
+        
+        if image1 is None or image2 is None:
+            raise HTTPException(status_code=400, detail="画像の読み込みに失敗しました")
+        
+        results = {}
+        
+        # Buffalo_l モデル比較
+        buffalo_start = time.time()
+        try:
+            if BUFFALO_L_AVAILABLE:
+                # Buffalo_l で両方の画像から埋め込みを取得
+                faces1 = buffalo_l_app.get(image1)
+                faces2 = buffalo_l_app.get(image2)
+                
+                if len(faces1) > 0 and len(faces2) > 0:
+                    # 最大の顔を使用
+                    face1 = max(faces1, key=lambda x: x.bbox[2] * x.bbox[3])
+                    face2 = max(faces2, key=lambda x: x.bbox[2] * x.bbox[3])
+                    
+                    embedding1 = np.asarray(face1.embedding, dtype=np.float32)
+                    embedding2 = np.asarray(face2.embedding, dtype=np.float32)
+                    
+                    # コサイン類似度計算
+                    similarity = np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
+                    threshold = 0.6  # Buffalo_l の標準閾値
+                    
+                    buffalo_time = (time.time() - buffalo_start) * 1000
+                    
+                    results["buffalo_l"] = {
+                        "available": True,
+                        "model_name": "Buffalo_l",
+                        "similarity": float(similarity),
+                        "threshold": threshold,
+                        "is_same": similarity > threshold,
+                        "processing_time_ms": buffalo_time
+                    }
+                else:
+                    results["buffalo_l"] = {
+                        "available": False,
+                        "error": "顔検出に失敗しました"
+                    }
+            else:
+                results["buffalo_l"] = {
+                    "available": False,
+                    "error": "Buffalo_l モデルが利用できません"
+                }
+        except Exception as e:
+            print(f"❌ Buffalo_l詳細エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            results["buffalo_l"] = {
+                "available": False,
+                "error": f"Buffalo_l エラー: {str(e)}"
+            }
+        
+        # JAPANESE_FACE_v1 モデル比較
+        japanese_start = time.time()
+        try:
+            if japanese_face_v1_session:
+                # 指定された検出方式を使用
+                embedding1 = get_embedding_japanese_face_v1_from_image(image1, detection_method=detection_method)
+                embedding2 = get_embedding_japanese_face_v1_from_image(image2, detection_method=detection_method)
+                
+                if embedding1 is not None and embedding2 is not None:
+                    # numpy配列であることを確認して変換
+                    embedding1 = np.asarray(embedding1, dtype=np.float32)
+                    embedding2 = np.asarray(embedding2, dtype=np.float32)
+                    
+                    # コサイン類似度計算
+                    similarity = np.dot(embedding1, embedding2) / (np.linalg.norm(embedding1) * np.linalg.norm(embedding2))
+                    threshold = 0.7  # JAPANESE_FACE_v1 の標準閾値
+                    
+                    japanese_time = (time.time() - japanese_start) * 1000
+                    
+                    results["japanese_face_v1"] = {
+                        "available": True,
+                        "model_name": "JAPANESE_FACE_v1",
+                        "similarity": float(similarity),
+                        "threshold": threshold,
+                        "is_same": similarity > threshold,
+                        "processing_time_ms": japanese_time,
+                        "detection_method": detection_method
+                    }
+                else:
+                    results["japanese_face_v1"] = {
+                        "available": False,
+                        "error": "顔検出または埋め込み生成に失敗しました"
+                    }
+            else:
+                results["japanese_face_v1"] = {
+                    "available": False,
+                    "error": "JAPANESE_FACE_v1 モデルが利用できません"
+                }
+        except Exception as e:
+            print(f"❌ JAPANESE_FACE_v1詳細エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            results["japanese_face_v1"] = {
+                "available": False,
+                "error": f"JAPANESE_FACE_v1 エラー: {str(e)}"
+            }
+        
+        return {
+            "success": True,
+            "file1_name": file1.filename,
+            "file2_name": file2.filename,
+            "detection_method": detection_method,
+            "comparison_results": results
+        }
+        
+    except Exception as e:
+        print(f"❌ モデル比較エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"モデル比較エラー: {str(e)}")
+
+@app.post("/compare_models_folder")
+async def compare_models_folder(
+    query_image: UploadFile = File(...),
+    folder_images: List[UploadFile] = File(...),
+    detection_method: str = Form("mediapipe")  # "mediapipe" または "buffalo_l"
+):
+    """Buffalo_l vs JAPANESE_FACE_v1 モデル比較 (1対N)"""
+    print(f"🆚 1対Nモデル比較開始: {query_image.filename} vs {len(folder_images)}ファイル")
+    print(f"🔍 検出方式: {detection_method}")
+    
+    try:
+        # クエリ画像読み込み
+        query_data = await query_image.read()
+        query_img = np.frombuffer(query_data, np.uint8)
+        query_img = cv2.imdecode(query_img, cv2.IMREAD_COLOR)
+        
+        if query_img is None:
+            raise HTTPException(status_code=400, detail="クエリ画像の読み込みに失敗しました")
+        
+        results = {
+            "query_image": query_image.filename,
+            "total_comparisons": len(folder_images),
+            "detection_method": detection_method
+        }
+        
+        # Buffalo_l モデルでの比較
+        buffalo_start = time.time()
+        buffalo_matches = []
+        buffalo_available = False
+        
+        try:
+            if BUFFALO_L_AVAILABLE:
+                # クエリ画像の埋め込み取得
+                query_faces = buffalo_l_app.get(query_img)
+                if len(query_faces) > 0:
+                    query_face = max(query_faces, key=lambda x: x.bbox[2] * x.bbox[3])
+                    query_embedding = query_face.embedding
+                    buffalo_available = True
+                    
+                    # 各フォルダ画像と比較
+                    for folder_file in folder_images:
+                        try:
+                            folder_data = await folder_file.read()
+                            folder_img = np.frombuffer(folder_data, np.uint8)
+                            folder_img = cv2.imdecode(folder_img, cv2.IMREAD_COLOR)
+                            
+                            if folder_img is not None:
+                                folder_faces = buffalo_l_app.get(folder_img)
+                                if len(folder_faces) > 0:
+                                    folder_face = max(folder_faces, key=lambda x: x.bbox[2] * x.bbox[3])
+                                    folder_embedding = folder_face.embedding
+                                    
+                                    # 類似度計算
+                                    similarity = np.dot(query_embedding, folder_embedding) / (
+                                        np.linalg.norm(query_embedding) * np.linalg.norm(folder_embedding)
+                                    )
+                                    
+                                    buffalo_matches.append({
+                                        "filename": folder_file.filename,
+                                        "similarity": float(similarity),
+                                        "is_match": similarity > 0.6
+                                    })
+                        except Exception as e:
+                            print(f"⚠️ Buffalo_l ファイル処理エラー ({folder_file.filename}): {e}")
+                            continue
+            
+            # 類似度順にソート
+            buffalo_matches.sort(key=lambda x: x["similarity"], reverse=True)
+            buffalo_time = (time.time() - buffalo_start) * 1000
+            
+            results["buffalo_l"] = {
+                "available": buffalo_available,
+                "processing_time_ms": buffalo_time,
+                "matches": buffalo_matches,
+                "error": None if buffalo_available else "Buffalo_l 顔検出に失敗"
+            }
+            
+        except Exception as e:
+            results["buffalo_l"] = {
+                "available": False,
+                "processing_time_ms": 0,
+                "matches": [],
+                "error": f"Buffalo_l エラー: {str(e)}"
+            }
+        
+        # JAPANESE_FACE_v1 モデルでの比較
+        japanese_start = time.time()
+        japanese_matches = []
+        japanese_available = False
+        
+        try:
+            if japanese_face_v1_session:
+                # クエリ画像の埋め込み取得
+                query_embedding = get_embedding_japanese_face_v1_from_image(query_img, detection_method=detection_method)
+                if query_embedding is not None:
+                    japanese_available = True
+                    
+                    # 各フォルダ画像と比較
+                    for folder_file in folder_images:
+                        try:
+                            folder_data = await folder_file.read()
+                            folder_img = np.frombuffer(folder_data, np.uint8)
+                            folder_img = cv2.imdecode(folder_img, cv2.IMREAD_COLOR)
+                            
+                            if folder_img is not None:
+                                folder_embedding = get_embedding_japanese_face_v1_from_image(folder_img, detection_method=detection_method)
+                                
+                                if folder_embedding is not None:
+                                    # 類似度計算
+                                    similarity = np.dot(query_embedding, folder_embedding) / (
+                                        np.linalg.norm(query_embedding) * np.linalg.norm(folder_embedding)
+                                    )
+                                    
+                                    japanese_matches.append({
+                                        "filename": folder_file.filename,
+                                        "similarity": float(similarity),
+                                        "is_match": similarity > 0.7
+                                    })
+                        except Exception as e:
+                            print(f"⚠️ JAPANESE_FACE_v1 ファイル処理エラー ({folder_file.filename}): {e}")
+                            continue
+            
+            # 類似度順にソート
+            japanese_matches.sort(key=lambda x: x["similarity"], reverse=True)
+            japanese_time = (time.time() - japanese_start) * 1000
+            
+            results["japanese_face_v1"] = {
+                "available": japanese_available,
+                "processing_time_ms": japanese_time,
+                "matches": japanese_matches,
+                "error": None if japanese_available else "JAPANESE_FACE_v1 顔検出に失敗"
+            }
+            
+        except Exception as e:
+            results["japanese_face_v1"] = {
+                "available": False,
+                "processing_time_ms": 0,
+                "matches": [],
+                "error": f"JAPANESE_FACE_v1 エラー: {str(e)}"
+            }
+        
+        # マッチ数の集計
+        results["matches_found"] = {
+            "buffalo_l": len([m for m in buffalo_matches if m["is_match"]]) if buffalo_matches else 0,
+            "japanese_face_v1": len([m for m in japanese_matches if m["is_match"]]) if japanese_matches else 0
+        }
+        
+        return results
+        
+    except Exception as e:
+        print(f"❌ 1対Nモデル比較エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"1対Nモデル比較エラー: {str(e)}")
+
+@app.post("/debug_face_detection")
+async def debug_face_detection(file: UploadFile = File(...)):
+    """顔検知デバッグ用エンドポイント - 切り出し画像を確認"""
+    print(f"🔍 顔検知デバッグ開始: {file.filename}")
+    
+    try:
+        # 画像読み込み
+        image_data = await file.read()
+        image = np.frombuffer(image_data, np.uint8)
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise HTTPException(status_code=400, detail="画像の読み込みに失敗しました")
+        
+        # ディレクトリ作成
+        import os
+        os.makedirs("static/temp", exist_ok=True)
+        
+        # 元画像を保存
+        original_path = f"static/temp/debug_original_{int(time.time())}.jpg"
+        success = cv2.imwrite(original_path, image)
+        if not success:
+            print(f"❌ 元画像保存失敗: {original_path}")
+            original_path = None
+        else:
+            print(f"🖼️  元画像を保存: {original_path}")
+        
+        # Buffalo_lで顔検出
+        if not BUFFALO_L_AVAILABLE:
+            return {"error": "Buffalo_lが利用できません"}
+        
+        # BGR -> RGB変換
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # 顔検出実行
+        faces = buffalo_l_app.get(rgb_image)
+        
+        result = {
+            "filename": file.filename,
+            "image_size": image.shape,
+            "faces_detected": len(faces),
+            "original_image": f"/{original_path}" if original_path else None,
+            "faces": []
+        }
+        
+        if len(faces) == 0:
+            result["message"] = "顔が検出されませんでした"
+            return result
+        
+        # 各検出された顔の情報
+        for i, face in enumerate(faces):
+            bbox = face.bbox.astype(int)
+            x1, y1, x2, y2 = bbox
+            
+            # 顔領域を切り出し
+            face_crop = image[y1:y2, x1:x2]
+            
+            # 切り出し画像を保存
+            crop_path = f"static/temp/debug_face_{i}_{int(time.time())}.jpg"
+            crop_success = cv2.imwrite(crop_path, face_crop)
+            if not crop_success:
+                print(f"❌ 切り出し画像保存失敗: {crop_path}")
+                crop_path = None
+            
+            # 縦横比を保持して224x224にリサイズ（パディング付き）
+            def resize_with_padding(img, target_size=(224, 224)):
+                h, w = img.shape[:2]
+                target_w, target_h = target_size
+                
+                # スケール比率を計算（縦横比を保持）
+                scale = min(target_w / w, target_h / h)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                
+                # リサイズ
+                resized = cv2.resize(img, (new_w, new_h))
+                
+                # パディング用の背景（黒）を作成
+                padded = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+                
+                # 中央に配置
+                y_offset = (target_h - new_h) // 2
+                x_offset = (target_w - new_w) // 2
+                padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+                
+                return padded
+            
+            aligned_face = resize_with_padding(face_crop, (224, 224))
+            aligned_path = f"static/temp/debug_aligned_{i}_{int(time.time())}.jpg"
+            aligned_success = cv2.imwrite(aligned_path, aligned_face)
+            if not aligned_success:
+                print(f"❌ アライメント画像保存失敗: {aligned_path}")
+                aligned_path = None
+            
+            face_info = {
+                "face_id": i,
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "detection_score": float(face.det_score),
+                "face_crop": f"/{crop_path}" if crop_path else None,
+                "aligned_face": f"/{aligned_path}" if aligned_path else None,
+                "crop_size": face_crop.shape
+            }
+            result["faces"].append(face_info)
+            
+            print(f"👤 顔{i}: bbox=({x1},{y1},{x2},{y2}), score={face.det_score:.3f}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ 顔検知デバッグエラー: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"顔検知デバッグエラー: {str(e)}")
+
+@app.post("/compare_face_detection")
+async def compare_face_detection(file: UploadFile = File(...)):
+    """MediaPipe vs Buffalo_l 顔検出比較エンドポイント"""
+    print(f"🔍 顔検知比較開始: {file.filename}")
+    
+    try:
+        # 画像読み込み
+        image_data = await file.read()
+        image = np.frombuffer(image_data, np.uint8)
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise HTTPException(status_code=400, detail="画像の読み込みに失敗しました")
+        
+        # ディレクトリ作成
+        import os
+        os.makedirs("static/temp", exist_ok=True)
+        
+        # 元画像を保存
+        original_path = f"static/temp/compare_original_{int(time.time())}.jpg"
+        success = cv2.imwrite(original_path, image)
+        if not success:
+            print(f"❌ 元画像保存失敗: {original_path}")
+            original_path = None
+        else:
+            print(f"🖼️  元画像を保存: {original_path}")
+        
+        # 縦横比を保持してリサイズする関数
+        def resize_with_padding(img, target_size=(224, 224)):
+            h, w = img.shape[:2]
+            target_w, target_h = target_size
+            
+            # スケール比率を計算（縦横比を保持）
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            # リサイズ
+            resized = cv2.resize(img, (new_w, new_h))
+            
+            # パディング用の背景（黒）を作成
+            padded = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+            
+            # 中央に配置
+            y_offset = (target_h - new_h) // 2
+            x_offset = (target_w - new_w) // 2
+            padded[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+            
+            return padded
+        
+        # MediaPipeで顔検出
+        mediapipe_faces = detect_faces_mediapipe(image)
+        
+        # Buffalo_lで顔検出
+        buffalo_faces = detect_faces_buffalo_l(image)
+        
+        result = {
+            "filename": file.filename,
+            "image_size": image.shape,
+            "original_image": f"/{original_path}" if original_path else None,
+            "mediapipe": {
+                "available": MEDIAPIPE_AVAILABLE,
+                "faces_detected": len(mediapipe_faces),
+                "faces": []
+            },
+            "buffalo_l": {
+                "available": BUFFALO_L_AVAILABLE,
+                "faces_detected": len(buffalo_faces),
+                "faces": []
+            }
+        }
+        
+        # MediaPipe検出結果の処理
+        for i, face in enumerate(mediapipe_faces):
+            x1, y1, x2, y2 = face['bbox']
+            
+            # 顔領域を切り出し
+            face_crop = image[y1:y2, x1:x2]
+            
+            # 切り出し画像を保存
+            crop_path = f"static/temp/mp_face_{i}_{int(time.time())}.jpg"
+            crop_success = cv2.imwrite(crop_path, face_crop)
+            
+            # 224x224リサイズ（縦横比保持）
+            aligned_face = resize_with_padding(face_crop, (224, 224))
+            aligned_path = f"static/temp/mp_aligned_{i}_{int(time.time())}.jpg"
+            aligned_success = cv2.imwrite(aligned_path, aligned_face)
+            
+            face_info = {
+                "face_id": i,
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "confidence": float(face['confidence']),
+                "face_crop": f"/{crop_path}" if crop_success else None,
+                "aligned_face": f"/{aligned_path}" if aligned_success else None,
+                "crop_size": face_crop.shape,
+                "method": "MediaPipe"
+            }
+            result["mediapipe"]["faces"].append(face_info)
+        
+        # Buffalo_l検出結果の処理
+        for i, face in enumerate(buffalo_faces):
+            x1, y1, x2, y2 = face['bbox']
+            
+            # 顔領域を切り出し
+            face_crop = image[y1:y2, x1:x2]
+            
+            # 切り出し画像を保存
+            crop_path = f"static/temp/bl_face_{i}_{int(time.time())}.jpg"
+            crop_success = cv2.imwrite(crop_path, face_crop)
+            
+            # 224x224リサイズ（縦横比保持）
+            aligned_face = resize_with_padding(face_crop, (224, 224))
+            aligned_path = f"static/temp/bl_aligned_{i}_{int(time.time())}.jpg"
+            aligned_success = cv2.imwrite(aligned_path, aligned_face)
+            
+            face_info = {
+                "face_id": i,
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "confidence": float(face['confidence']),
+                "face_crop": f"/{crop_path}" if crop_success else None,
+                "aligned_face": f"/{aligned_path}" if aligned_success else None,
+                "crop_size": face_crop.shape,
+                "method": "Buffalo_l"
+            }
+            result["buffalo_l"]["faces"].append(face_info)
+        
+        print(f"🔍 検出結果 - MediaPipe: {len(mediapipe_faces)}顔, Buffalo_l: {len(buffalo_faces)}顔")
+        return result
+        
+    except Exception as e:
+        print(f"❌ 顔検知比較エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"顔検知比較エラー: {str(e)}")
+
+@app.post("/compare_1vn_accuracy")
+async def compare_1vn_accuracy(
+    query_image: UploadFile = File(...),
+    folder_images: List[UploadFile] = File(...)
+):
+    """1対N顔検索でMediaPipe vs Buffalo_l の精度比較"""
+    print(f"🔍 1対N精度比較開始: クエリ={query_image.filename}, フォルダ={len(folder_images)}枚")
+    
+    try:
+        # クエリ画像の読み込み
+        query_data = await query_image.read()
+        query_img = np.frombuffer(query_data, np.uint8)
+        query_img = cv2.imdecode(query_img, cv2.IMREAD_COLOR)
+        
+        if query_img is None:
+            raise HTTPException(status_code=400, detail="クエリ画像の読み込みに失敗しました")
+        
+        # MediaPipeでクエリ画像の埋め込みを取得
+        mp_query_embedding, mp_query_confidence = get_embedding_with_mediapipe_detection(query_img)
+        
+        # Buffalo_lでクエリ画像の埋め込みを取得
+        bl_query_embedding, bl_query_confidence = get_embedding_with_buffalo_l_detection(query_img)
+        
+        result = {
+            "query_filename": query_image.filename,
+            "total_images": int(len(folder_images)),
+            "mediapipe": {
+                "available": bool(MEDIAPIPE_AVAILABLE and mp_query_embedding is not None),
+                "query_confidence": float(mp_query_confidence) if mp_query_confidence else 0.0,
+                "matches": [],
+                "processing_time_ms": 0.0
+            },
+            "buffalo_l": {
+                "available": bool(BUFFALO_L_AVAILABLE and bl_query_embedding is not None),
+                "query_confidence": float(bl_query_confidence) if bl_query_confidence else 0.0,
+                "matches": [],
+                "processing_time_ms": 0.0
+            }
+        }
+        
+        # 全画像データを先に読み込み
+        folder_images_data = []
+        for folder_img_file in folder_images:
+            try:
+                img_data = await folder_img_file.read()
+                if img_data:
+                    folder_images_data.append({
+                        'filename': folder_img_file.filename,
+                        'data': img_data
+                    })
+                else:
+                    print(f"⚠️ 空のファイル: {folder_img_file.filename}")
+            except Exception as e:
+                print(f"❌ ファイル読み込みエラー ({folder_img_file.filename}): {e}")
+        
+        # MediaPipe処理
+        if result["mediapipe"]["available"]:
+            start_time = time.time()
+            mp_similarities = []
+            
+            for i, img_info in enumerate(folder_images_data):
+                try:
+                    img = np.frombuffer(img_info['data'], np.uint8)
+                    img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+                    
+                    if img is None:
+                        continue
+                    
+                    # MediaPipeで埋め込み取得
+                    folder_embedding, folder_confidence = get_embedding_with_mediapipe_detection(img)
+                    
+                    if folder_embedding is not None:
+                        # コサイン類似度計算
+                        similarity = np.dot(mp_query_embedding, folder_embedding)
+                        is_match = similarity > 0.6  # 閾値
+                        
+                        mp_similarities.append({
+                            "filename": img_info['filename'],
+                            "similarity": float(similarity),
+                            "confidence": float(folder_confidence),
+                            "is_match": bool(is_match),  # numpy.bool_をboolに変換
+                            "index": int(i)
+                        })
+                        
+                except Exception as e:
+                    print(f"❌ MediaPipe処理エラー ({img_info['filename']}): {e}")
+                    continue
+            
+            # 類似度でソート
+            mp_similarities.sort(key=lambda x: x['similarity'], reverse=True)
+            result["mediapipe"]["matches"] = mp_similarities
+            result["mediapipe"]["processing_time_ms"] = float((time.time() - start_time) * 1000)
+        
+        # Buffalo_l処理
+        if result["buffalo_l"]["available"]:
+            start_time = time.time()
+            bl_similarities = []
+            
+            for i, img_info in enumerate(folder_images_data):
+                try:
+                    img = np.frombuffer(img_info['data'], np.uint8)
+                    img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+                    
+                    if img is None:
+                        continue
+                    
+                    # Buffalo_lで埋め込み取得
+                    folder_embedding, folder_confidence = get_embedding_with_buffalo_l_detection(img)
+                    
+                    if folder_embedding is not None:
+                        # コサイン類似度計算
+                        similarity = np.dot(bl_query_embedding, folder_embedding)
+                        is_match = similarity > 0.6  # 閾値
+                        
+                        bl_similarities.append({
+                            "filename": img_info['filename'],
+                            "similarity": float(similarity),
+                            "confidence": float(folder_confidence),
+                            "is_match": bool(is_match),  # numpy.bool_をboolに変換
+                            "index": int(i)
+                        })
+                        
+                except Exception as e:
+                    print(f"❌ Buffalo_l処理エラー ({img_info['filename']}): {e}")
+                    continue
+            
+            # 類似度でソート
+            bl_similarities.sort(key=lambda x: x['similarity'], reverse=True)
+            result["buffalo_l"]["matches"] = bl_similarities
+            result["buffalo_l"]["processing_time_ms"] = float((time.time() - start_time) * 1000)
+        
+        print(f"🔍 1対N比較完了 - MediaPipe: {len(result['mediapipe']['matches'])}件, Buffalo_l: {len(result['buffalo_l']['matches'])}件")
+        return result
+        
+    except Exception as e:
+        print(f"❌ 1対N精度比較エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"1対N精度比較エラー: {str(e)}")

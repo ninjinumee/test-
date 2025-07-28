@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaPipe vs Buffalo_l 顔検出比較</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 5px;
+            background: #f8f9ff;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+        }
+        .comparison-container {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        .detection-result {
+            flex: 1;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 20px;
+            background: white;
+        }
+        .detection-result.mediapipe {
+            border-left: 4px solid #ff9800;
+        }
+        .detection-result.buffalo {
+            border-left: 4px solid #4caf50;
+        }
+        .face-images {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .face-image {
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        .face-image img {
+            max-width: 150px;
+            max-height: 150px;
+            border-radius: 5px;
+        }
+        .face-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .original-image {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .original-image img {
+            max-width: 400px;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+        }
+        .stats-comparison {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+        }
+        .stat-item {
+            text-align: center;
+            flex: 1;
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🆚 MediaPipe vs Buffalo_l 顔検出比較</h1>
+        
+        <div class="upload-section">
+            <h2>画像アップロード</h2>
+            <input type="file" id="fileInput" accept="image/*">
+            <button onclick="compareFaceDetection()">比較実行</button>
+        </div>
+        
+        <div id="results" class="results" style="display: none;">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        async function compareFaceDetection() {
+            const fileInput = document.getElementById('fileInput');
+            const resultsDiv = document.getElementById('results');
+            const resultContent = document.getElementById('resultContent');
+            
+            if (!fileInput.files[0]) {
+                alert('画像を選択してください');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            try {
+                resultContent.innerHTML = '<p>処理中...</p>';
+                resultsDiv.style.display = 'block';
+                
+                const response = await fetch('/compare_face_detection', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResults(data);
+                } else {
+                    resultContent.innerHTML = `<p style="color: red;">エラー: ${data.detail}</p>`;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultContent.innerHTML = `<p style="color: red;">エラー: ${error.message}</p>`;
+            }
+        }
+        
+        function displayResults(data) {
+            const resultContent = document.getElementById('resultContent');
+            
+            let html = `
+                <h3>🖼️ 比較結果: ${data.filename}</h3>
+                <div class="face-info">
+                    <p><strong>画像サイズ:</strong> ${data.image_size[1]}×${data.image_size[0]} (W×H)</p>
+                </div>
+            `;
+            
+            // 元画像表示
+            if (data.original_image) {
+                html += `
+                    <div class="original-image">
+                        <h4>📷 元画像</h4>
+                        <img src="${data.original_image}" alt="元画像">
+                    </div>
+                `;
+            }
+            
+            // 統計比較
+            html += `
+                <div class="stats-comparison">
+                    <div class="stat-item">
+                        <div class="stat-value">${data.mediapipe.faces_detected}</div>
+                        <div>MediaPipe検出数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.buffalo_l.faces_detected}</div>
+                        <div>Buffalo_l検出数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.mediapipe.available ? '✅' : '❌'}</div>
+                        <div>MediaPipe状態</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">${data.buffalo_l.available ? '✅' : '❌'}</div>
+                        <div>Buffalo_l状態</div>
+                    </div>
+                </div>
+            `;
+            
+            // 比較結果コンテナ
+            html += '<div class="comparison-container">';
+            
+            // MediaPipe結果
+            html += `
+                <div class="detection-result mediapipe">
+                    <h4>🟠 MediaPipe (${data.mediapipe.faces_detected}顔検出)</h4>
+            `;
+            
+            if (data.mediapipe.available && data.mediapipe.faces_detected > 0) {
+                data.mediapipe.faces.forEach((face, index) => {
+                    html += `
+                        <div class="face-info">
+                            <p><strong>顔 ${face.face_id + 1}</strong></p>
+                            <p><strong>信頼度:</strong> ${(face.confidence * 100).toFixed(1)}%</p>
+                            <p><strong>位置:</strong> (${face.bbox[0]}, ${face.bbox[1]}) - (${face.bbox[2]}, ${face.bbox[3]})</p>
+                            <p><strong>サイズ:</strong> ${face.crop_size[1]}×${face.crop_size[0]}</p>
+                        </div>
+                        <div class="face-images">
+                            <div class="face-image">
+                                <img src="${face.face_crop}" alt="切り出し顔">
+                                <p>切り出し画像</p>
+                            </div>
+                            <div class="face-image">
+                                <img src="${face.aligned_face}" alt="アライメント後">
+                                <p>224×224リサイズ後</p>
+                            </div>
+                        </div>
+                    `;
+                });
+            } else if (!data.mediapipe.available) {
+                html += '<p style="color: red;">MediaPipeが利用できません</p>';
+            } else {
+                html += '<p style="color: orange;">顔が検出されませんでした</p>';
+            }
+            
+            html += '</div>';
+            
+            // Buffalo_l結果
+            html += `
+                <div class="detection-result buffalo">
+                    <h4>🟢 Buffalo_l (${data.buffalo_l.faces_detected}顔検出)</h4>
+            `;
+            
+            if (data.buffalo_l.available && data.buffalo_l.faces_detected > 0) {
+                data.buffalo_l.faces.forEach((face, index) => {
+                    html += `
+                        <div class="face-info">
+                            <p><strong>顔 ${face.face_id + 1}</strong></p>
+                            <p><strong>信頼度:</strong> ${(face.confidence * 100).toFixed(1)}%</p>
+                            <p><strong>位置:</strong> (${face.bbox[0]}, ${face.bbox[1]}) - (${face.bbox[2]}, ${face.bbox[3]})</p>
+                            <p><strong>サイズ:</strong> ${face.crop_size[1]}×${face.crop_size[0]}</p>
+                        </div>
+                        <div class="face-images">
+                            <div class="face-image">
+                                <img src="${face.face_crop}" alt="切り出し顔">
+                                <p>切り出し画像</p>
+                            </div>
+                            <div class="face-image">
+                                <img src="${face.aligned_face}" alt="アライメント後">
+                                <p>224×224リサイズ後</p>
+                            </div>
+                        </div>
+                    `;
+                });
+            } else if (!data.buffalo_l.available) {
+                html += '<p style="color: red;">Buffalo_lが利用できません</p>';
+            } else {
+                html += '<p style="color: orange;">顔が検出されませんでした</p>';
+            }
+            
+            html += '</div>';
+            html += '</div>'; // comparison-container終了
+            
+            resultContent.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

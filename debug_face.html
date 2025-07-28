@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>顔検知デバッグツール</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 5px;
+            background: #f8f9ff;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+        }
+        .face-result {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            background: white;
+        }
+        .face-images {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .face-image {
+            text-align: center;
+        }
+        .face-image img {
+            max-width: 200px;
+            max-height: 200px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+        }
+        .face-info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 顔検知デバッグツール</h1>
+        
+        <div class="upload-section">
+            <h2>画像アップロード</h2>
+            <input type="file" id="fileInput" accept="image/*">
+            <button onclick="debugFaceDetection()">顔検知デバッグ実行</button>
+        </div>
+        
+        <div id="results" class="results" style="display: none;">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        async function debugFaceDetection() {
+            const fileInput = document.getElementById('fileInput');
+            const resultsDiv = document.getElementById('results');
+            const resultContent = document.getElementById('resultContent');
+            
+            if (!fileInput.files[0]) {
+                alert('画像を選択してください');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            try {
+                resultContent.innerHTML = '<p>処理中...</p>';
+                resultsDiv.style.display = 'block';
+                
+                const response = await fetch('/debug_face_detection', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResults(data);
+                } else {
+                    resultContent.innerHTML = `<p style="color: red;">エラー: ${data.detail}</p>`;
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultContent.innerHTML = `<p style="color: red;">エラー: ${error.message}</p>`;
+            }
+        }
+        
+        function displayResults(data) {
+            const resultContent = document.getElementById('resultContent');
+            
+            let html = `
+                <h3>🖼️ 検出結果: ${data.filename}</h3>
+                <div class="face-info">
+                    <p><strong>画像サイズ:</strong> ${data.image_size[1]}×${data.image_size[0]} (W×H)</p>
+                    <p><strong>検出された顔数:</strong> ${data.faces_detected}</p>
+                </div>
+            `;
+            
+            if (data.original_image) {
+                html += `
+                    <div class="face-result">
+                        <h4>📷 元画像</h4>
+                        <div class="face-image">
+                            <img src="${data.original_image}" alt="元画像">
+                            <p>元画像</p>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            if (data.faces_detected === 0) {
+                html += `<p style="color: orange;">⚠️ ${data.message}</p>`;
+            } else {
+                data.faces.forEach((face, index) => {
+                    html += `
+                        <div class="face-result">
+                            <h4>👤 顔 ${face.face_id + 1}</h4>
+                            <div class="face-info">
+                                <p><strong>検出スコア:</strong> ${(face.detection_score * 100).toFixed(1)}%</p>
+                                <p><strong>バウンディングボックス:</strong> (${face.bbox[0]}, ${face.bbox[1]}) - (${face.bbox[2]}, ${face.bbox[3]})</p>
+                                <p><strong>切り出しサイズ:</strong> ${face.crop_size[1]}×${face.crop_size[0]}</p>
+                            </div>
+                            <div class="face-images">
+                                <div class="face-image">
+                                    <img src="${face.face_crop}" alt="切り出し顔">
+                                    <p>切り出し画像</p>
+                                </div>
+                                <div class="face-image">
+                                    <img src="${face.aligned_face}" alt="アライメント後">
+                                    <p>224×224リサイズ後（縦横比保持）</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            resultContent.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

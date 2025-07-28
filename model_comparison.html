@@ -144,6 +144,21 @@
         .similarity-score.no-match {
             color: #f44336;
         }
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            margin-top: 8px;
+        }
+        .radio-group label {
+            display: flex;
+            align-items: center;
+            font-weight: normal;
+            cursor: pointer;
+            margin-bottom: 0;
+        }
+        .radio-group input[type="radio"] {
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -164,6 +179,17 @@
                     <label>
                         <input type="radio" name="comparison_type" value="1vsN">
                         🔍 1対N比較
+                    </label>
+                </div>
+            </div>
+            
+            <!-- 検出方式選択 -->
+            <div class="form-group">
+                <label>顔検出方式:</label>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="detection_method" value="buffalo_l" checked>
+                        🐃 Buffalo_l (高精度・標準)
                     </label>
                 </div>
             </div>
@@ -247,6 +273,10 @@
             
             const formData = new FormData(form1vs1);
             
+            // 検出方式を追加
+            const detectionMethod = document.querySelector('input[name="detection_method"]:checked').value;
+            formData.append('detection_method', detectionMethod);
+            
             // UI状態更新
             compare1vs1Btn.disabled = true;
             showStatus('loading', '1対1モデル比較実行中...');
@@ -281,6 +311,10 @@
             
             const formData = new FormData(form1vsN);
             const folderImages = document.getElementById('folderImages').files;
+            
+            // 検出方式を追加
+            const detectionMethod = document.querySelector('input[name="detection_method"]:checked').value;
+            formData.append('detection_method', detectionMethod);
             
             // ファイル数チェック
             if (folderImages.length === 0) {
