@@ -1,1 +1,11 @@
-deepface 
+fastapi
+uvicorn
+deepface
+tf-keras
+onnxruntime
+numpy
+opencv-python
+pillow
+python-multipart
+jinja2
+mediapipe 

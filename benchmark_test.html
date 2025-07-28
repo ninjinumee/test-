@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArcFace 速度比較テスト</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .test-section h2 {
+            color: #444;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 5px;
+            background: #f8f9ff;
+        }
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            margin: 10px 0;
+        }
+        .radio-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: normal;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: transform 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            border: 2px solid #667eea;
+        }
+        .performance-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .metric-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #333;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .comparison-table th,
+        .comparison-table td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        .comparison-table th {
+            background: #667eea;
+            color: white;
+        }
+        .comparison-table tr:nth-child(even) {
+            background: #f8f9ff;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 ArcFace 速度比較ベンチマーク</h1>
+        
+        <div class="test-section">
+            <h2>📋 テスト設定</h2>
+            <form id="benchmarkForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="queryImage">クエリ画像 (比較対象):</label>
+                    <input type="file" id="queryImage" name="query_image" accept="image/*" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="folderImages">フォルダ画像 (複数選択):</label>
+                    <input type="file" id="folderImages" name="folder_images" accept="image/*" multiple required>
+                    <small style="color: #666;">複数の画像を選択してください（Ctrl+クリック または Cmd+クリック）</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>処理方式:</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="use_batch" value="true" checked>
+                            🚀 バッチ処理（高速）
+                        </label>
+                        <label>
+                            <input type="radio" name="use_batch" value="false">
+                            🐌 順次処理（非バッチ）
+                        </label>
+                    </div>
+                </div>
+                
+                <button type="submit" id="runBenchmark">ベンチマーク実行</button>
+            </form>
+        </div>
+        
+        <div class="test-section">
+            <h2>📊 テスト結果</h2>
+            <div id="status" class="status" style="display: none;"></div>
+            <div class="progress-bar" id="progressContainer" style="display: none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div id="results" class="results" style="display: none;">
+                <h3>🏆 パフォーマンス指標</h3>
+                <div id="performanceMetrics" class="performance-metrics"></div>
+                
+                <h3>📈 処理結果</h3>
+                <div id="processingResults"></div>
+                
+                <h3>🎯 上位マッチ結果</h3>
+                <div id="topMatches"></div>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h2>📝 比較テストの手順</h2>
+            <ol style="color: #555; line-height: 1.6;">
+                <li><strong>クエリ画像選択:</strong> 比較対象となる1つの画像を選択</li>
+                <li><strong>フォルダ画像選択:</strong> 検索対象となる複数の画像を選択（10～100枚推奨）</li>
+                <li><strong>処理方式選択:</strong> バッチ処理 vs 順次処理を選択</li>
+                <li><strong>実行:</strong> ベンチマークを実行して結果を比較</li>
+                <li><strong>結果確認:</strong> 処理時間、速度、精度を比較分析</li>
+            </ol>
+            
+            <h3>💡 期待される結果:</h3>
+            <ul style="color: #555; line-height: 1.6;">
+                <li><strong>バッチ処理:</strong> 高速（数十倍～数百倍の速度向上）</li>
+                <li><strong>順次処理:</strong> 低速だが確実な処理</li>
+                <li><strong>精度:</strong> 両方式で同じ結果が得られること</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('benchmarkForm');
+        const statusDiv = document.getElementById('status');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const resultsDiv = document.getElementById('results');
+        const runButton = document.getElementById('runBenchmark');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            const folderImages = document.getElementById('folderImages').files;
+            const useBatch = formData.get('use_batch') === 'true';
+            
+            // ファイル数チェック
+            if (folderImages.length === 0) {
+                showStatus('error', 'フォルダ画像を選択してください');
+                return;
+            }
+            
+            if (folderImages.length > 200) {
+                if (!confirm(`${folderImages.length}ファイルが選択されています。処理に時間がかかる可能性があります。続行しますか？`)) {
+                    return;
+                }
+            }
+            
+            // UI状態更新
+            runButton.disabled = true;
+            showStatus('loading', `${useBatch ? 'バッチ処理' : '順次処理'}でベンチマーク実行中... (${folderImages.length}ファイル)`);
+            showProgress(0);
+            resultsDiv.style.display = 'none';
+            
+            try {
+                const startTime = Date.now();
+                
+                // API呼び出し
+                const response = await fetch('/compare_folder_benchmark', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const endTime = Date.now();
+                    const totalTimeMs = endTime - startTime;
+                    
+                    showStatus('success', `ベンチマーク完了! (${(totalTimeMs/1000).toFixed(2)}秒)`);
+                    showProgress(100);
+                    displayResults(data, totalTimeMs);
+                } else {
+                    throw new Error(data.error || 'ベンチマーク処理に失敗しました');
+                }
+                
+            } catch (error) {
+                console.error('ベンチマークエラー:', error);
+                showStatus('error', `エラー: ${error.message}`);
+                showProgress(0);
+            } finally {
+                runButton.disabled = false;
+            }
+        });
+
+        function showStatus(type, message) {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        function showProgress(percent) {
+            progressContainer.style.display = 'block';
+            progressFill.style.width = `${percent}%`;
+            
+            if (percent === 100) {
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        function displayResults(data, frontendTimeMs) {
+            const metrics = data.performance_metrics;
+            
+            // パフォーマンス指標表示
+            const metricsContainer = document.getElementById('performanceMetrics');
+            metricsContainer.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-label">処理方式</div>
+                    <div class="metric-value">${metrics.processing_method}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">総処理時間</div>
+                    <div class="metric-value">${(metrics.total_time_ms/1000).toFixed(2)}秒</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">比較処理時間</div>
+                    <div class="metric-value">${(metrics.comparison_time_ms/1000).toFixed(2)}秒</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">処理速度</div>
+                    <div class="metric-value">${metrics.files_per_second.toFixed(1)} ファイル/秒</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">1ファイル平均時間</div>
+                    <div class="metric-value">${metrics.avg_time_per_file_ms.toFixed(1)}ms</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">効率スコア</div>
+                    <div class="metric-value">${metrics.efficiency_score.toFixed(1)}</div>
+                </div>
+            `;
+            
+            // 処理結果表示
+            const processingResults = document.getElementById('processingResults');
+            processingResults.innerHTML = `
+                <table class="comparison-table">
+                    <tr>
+                        <th>項目</th>
+                        <th>値</th>
+                    </tr>
+                    <tr>
+                        <td>総ファイル数</td>
+                        <td>${data.total_files}</td>
+                    </tr>
+                    <tr>
+                        <td>処理済みファイル数</td>
+                        <td>${data.processed_files}</td>
+                    </tr>
+                    <tr>
+                        <td>マッチ数</td>
+                        <td>${data.matches_found}</td>
+                    </tr>
+                    <tr>
+                        <td>処理方式</td>
+                        <td>${data.benchmark_mode === 'batch' ? 'バッチ処理' : '順次処理'}</td>
+                    </tr>
+                    <tr>
+                        <td>フロントエンド通信時間</td>
+                        <td>${(frontendTimeMs/1000).toFixed(2)}秒</td>
+                    </tr>
+                </table>
+            `;
+            
+            // 上位マッチ表示
+            const topMatches = document.getElementById('topMatches');
+            if (data.top_matches && data.top_matches.length > 0) {
+                let matchesHtml = '<table class="comparison-table"><tr><th>順位</th><th>ファイル名</th><th>類似度</th><th>マッチ</th></tr>';
+                data.top_matches.forEach((match, index) => {
+                    matchesHtml += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${match.original_filename}</td>
+                            <td>${(match.best_similarity * 100).toFixed(1)}%</td>
+                            <td>${match.is_match ? '✅' : '❌'}</td>
+                        </tr>
+                    `;
+                });
+                matchesHtml += '</table>';
+                topMatches.innerHTML = matchesHtml;
+            } else {
+                topMatches.innerHTML = '<p>マッチ結果がありません</p>';
+            }
+            
+            resultsDiv.style.display = 'block';
+        }
+
+        // ファイル選択時の情報表示
+        document.getElementById('folderImages').addEventListener('change', function() {
+            const fileCount = this.files.length;
+            if (fileCount > 0) {
+                const info = document.createElement('div');
+                info.style.color = '#666';
+                info.style.fontSize = '0.9em';
+                info.style.marginTop = '5px';
+                info.textContent = `${fileCount}ファイルが選択されました`;
+                
+                // 既存の情報を削除
+                const existing = this.parentNode.querySelector('.file-info');
+                if (existing) existing.remove();
+                
+                info.className = 'file-info';
+                this.parentNode.appendChild(info);
+            }
+        });
+    </script>
+</body>
+</html>
