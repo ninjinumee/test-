@@ -124,11 +124,11 @@ try:
 except ImportError:
     print("警告: pillow-avif-plugin がインストールされていません。AVIF形式はサポートされません。")
 
-# AuraFace用のカスタムDeepFaceモデルクラス
-class AuraFace_Model:
+# JAPANESE_FACE_v1用のカスタムDeepFaceモデルクラス
+class JAPANESE_FACE_v1_Model:
     def __init__(self, session, model_info):
-        self.model_name = "AuraFace"
-        self.input_shape = (112, 112, 3)
+        self.model_name = "JAPANESE_FACE_v1"
+        self.input_shape = (224, 224, 3)
         self.output_shape = 512
         self.session = session
         self.model_info = model_info
@@ -136,7 +136,7 @@ class AuraFace_Model:
     def predict(self, img_array):
         """DeepFace互換の予測関数"""
         try:
-            # 入力を正規化 (DeepFaceは0-255, AuraFaceは-1~1)
+            # 入力を正規化 (DeepFaceは0-255, JAPANESE_FACE_v1は-1~1)
             if img_array.max() > 1.0:
                 img_array = (img_array - 127.5) / 128.0
             
@@ -157,20 +157,20 @@ class AuraFace_Model:
             return embedding
             
         except Exception as e:
-            print(f"AuraFace予測エラー: {e}")
+            print(f"JAPANESE_FACE_v1予測エラー: {e}")
             raise e
 
-# DeepFaceにAuraFaceモデルを登録する関数
-def register_auraface_to_deepface(session, model_info):
-    """AuraFaceをDeepFaceのモデルとして登録"""
+# DeepFaceにJAPANESE_FACE_v1モデルを登録する関数
+def register_japanese_face_v1_to_deepface(session, model_info):
+    """JAPANESE_FACE_v1をDeepFaceのモデルとして登録"""
     try:
-        # AuraFaceインスタンスを作成
-        auraface_instance = AuraFace_Model(session, model_info)
-        print("AuraFaceをDeepFace形式で初期化しました")
-        return auraface_instance
+        # JAPANESE_FACE_v1インスタンスを作成
+        japanese_face_v1_instance = JAPANESE_FACE_v1_Model(session, model_info)
+        print("JAPANESE_FACE_v1をDeepFace形式で初期化しました")
+        return japanese_face_v1_instance
         
     except Exception as e:
-        print(f"AuraFace登録エラー: {e}")
+        print(f"JAPANESE_FACE_v1登録エラー: {e}")
         return None
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -228,40 +228,40 @@ def benchmark_test():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="ベンチマークテストページが見つかりません")
 
-# Aurora FaceID モデル設定
+# JAPANESE_FACE_v1 モデル設定
 MODEL_CONFIG = {
-    "path": "glintr100.onnx",
-    "name": "AuraFace v1",
+    "path": "JAPANESE_FACE_v1.onnx",
+    "name": "JAPANESE_FACE_v1",
     "description": "GLint-R100データセットで訓練された高精度顔認識モデル（Apache 2.0ライセンス）",
-    "input_name": "data",
-    "input_size": (112, 112),
+    "input_name": "x.1",
+    "input_size": (224, 224),
     "output_name": "fc1",
     "embedding_size": 512
 }
 
 def initialize_model():
-    """AuraFaceモデルを初期化（MediaPipe顔検出）"""
+    """JAPANESE_FACE_v1モデルを初期化（MediaPipe顔検出）"""
     try:
-        # AuraFace必要ライブラリの確認
+        # JAPANESE_FACE_v1必要ライブラリの確認
         import torch
         from huggingface_hub import snapshot_download
         
-        print("🔄 AuraFace-v1モデルをHuggingFaceからダウンロード中...")
+        print("🔄 JAPANESE_FACE_v1モデルをHuggingFaceからダウンロード中...")
         
-        # HuggingFaceからAuraFaceモデルをダウンロード
+        # HuggingFaceからJAPANESE_FACE_v1モデルをダウンロード
         model_dir = snapshot_download(
-            repo_id="fal/AuraFace-v1",
-            local_dir="./models/auraface",
+            repo_id="fal/JAPANESE_FACE_v1",
+            local_dir="./models/japanese_face_v1",
             ignore_patterns=["*.md", "*.txt", "*.jpg", "*.png"]
         )
-        print(f"✅ AuraFaceモデルダウンロード完了: {model_dir}")
+        print(f"✅ JAPANESE_FACE_v1モデルダウンロード完了: {model_dir}")
         
         # プロバイダー設定
         providers = ['CPUExecutionProvider']
         if torch.cuda.is_available():
             providers.insert(0, 'CUDAExecutionProvider')
         
-        # AuraFace認識モデルファイルのパス
+        # JAPANESE_FACE_v1認識モデルファイルのパス
         model_path = os.path.join(model_dir, MODEL_CONFIG["path"])
         
         if not os.path.exists(model_path):
@@ -269,11 +269,11 @@ def initialize_model():
             onnx_files = [f for f in os.listdir(model_dir) if f.endswith('.onnx') and 'glintr' in f]
             if onnx_files:
                 model_path = os.path.join(model_dir, onnx_files[0])
-                print(f"🔍 発見されたAuraFaceモデル: {onnx_files[0]}")
+                print(f"🔍 発見されたJAPANESE_FACE_v1モデル: {onnx_files[0]}")
             else:
-                raise FileNotFoundError(f"AuraFace認識モデルが見つかりません: {model_dir}")
+                raise FileNotFoundError(f"JAPANESE_FACE_v1認識モデルが見つかりません: {model_dir}")
         
-        # AuraFace認識モデルをONNX Runtimeで読み込み
+        # JAPANESE_FACE_v1認識モデルをONNX Runtimeで読み込み
         session = onnxruntime.InferenceSession(model_path, providers=providers)
         
         # MediaPipeベースのモデル構造を返す
@@ -290,10 +290,10 @@ def initialize_model():
         print(f"❌ {MODEL_CONFIG['name']} 初期化エラー: {e}")
         return None
 
-# AuraFaceモデルセッションを初期化
-auraface_session = initialize_model()
+# JAPANESE_FACE_v1モデルセッションを初期化
+japanese_face_v1_session = initialize_model()
 
-print("🌟 AuraFace v1 + MediaPipe（Apache 2.0ライセンス）を使用します")
+print("🌟 JAPANESE_FACE_v1 + MediaPipe（Apache 2.0ライセンス）を使用します")
 
 # MediaPipe face detection and landmarks
 mp_face_detection = mp.solutions.face_detection
@@ -334,20 +334,20 @@ def detect_and_align_mediapipe(image):
             [landmarks.landmark[right_mouth_idx].x * w, landmarks.landmark[right_mouth_idx].y * h]
         ], dtype=np.float32)
         
-        # アライメント用の標準5点座標（112x112用）
+        # アライメント用の標準5点座標（224x224用）
         dst_points = np.array([
-            [38.2946, 51.6963],
-            [73.5318, 51.5014],
-            [56.0252, 71.7366],
-            [41.5493, 92.3655],
-            [70.7299, 92.2041]
+            [76.5892, 103.3926],
+            [147.0636, 103.0028],
+            [112.0504, 143.4732],
+            [83.0986, 184.731],
+            [141.4598, 184.4082]
         ], dtype=np.float32)
         
         # アフィン変換行列を計算
         tform = cv2.estimateAffinePartial2D(keypoints, dst_points)[0]
         
         # 顔画像をアライメント
-        aligned_face = cv2.warpAffine(image, tform, (112, 112))
+        aligned_face = cv2.warpAffine(image, tform, (224, 224))
         
         return aligned_face
 
@@ -495,7 +495,7 @@ def preprocess_image_for_model(file_path, use_detection=True):
 
 def preprocess_image_simple(file):
     """シンプルな前処理（顔検出なし）"""
-    img = Image.open(file).convert('RGB').resize((112, 112))
+    img = Image.open(file).convert('RGB').resize((224, 224))
     img = np.asarray(img, dtype=np.float32)
     img = (img - 127.5) / 128.0
     img = np.transpose(img, (2, 0, 1))  # CHW
@@ -551,7 +551,7 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
         available_memory_gb = 4.0  # デフォルト値
     
     # メモリに基づくバッチサイズ計算
-    # 各画像は約112x112x3x4 = 150KB、さらに前処理で2-3倍になると仮定
+    # 各画像は約224x224x3x4 = 600KB、さらに前処理で2-3倍になると仮定
     memory_per_image_mb = 0.5  # 保守的な見積もり
     max_batch_by_memory = int((available_memory_gb * 1024 * 0.3) / memory_per_image_mb)  # 利用可能メモリの30%を使用
     
@@ -576,7 +576,7 @@ def calculate_optimal_batch_size(total_files, available_memory_gb=None):
 
 def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     """バッチ処理による高速な特徴量抽出"""
-    if auraface_session is None:
+    if japanese_face_v1_session is None:
         return [], []
     
     # 自動バッチサイズ調整
@@ -584,7 +584,7 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
         batch_size = calculate_optimal_batch_size(len(file_paths))
     
     # 認識セッションを取得
-    recognition_session = auraface_session['recognition_session']
+    recognition_session = japanese_face_v1_session['recognition_session']
     input_name = MODEL_CONFIG["input_name"]
     
     all_embeddings = []
@@ -609,7 +609,7 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
                 print(f"⚠️ バッチ {batch_num}/{total_batches}: 処理可能な画像なし")
                 continue
             
-            # AuraFaceハイブリッドアプローチ - 個別処理でバッチ風に実行
+            # JAPANESE_FACE_v1ハイブリッドアプローチ - 個別処理でバッチ風に実行
             batch_embeddings = []
             batch_valid_indices = []
             
@@ -632,7 +632,7 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
                     face_aligned = np.transpose(face_aligned, (2, 0, 1))
                     face_aligned = np.expand_dims(face_aligned, axis=0)
                     
-                    # AuraFace認識
+                    # JAPANESE_FACE_v1認識
                     outputs = recognition_session.run(None, {input_name: face_aligned})
                     embedding = outputs[0][0]
                     
@@ -672,12 +672,12 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
     print(f"✅ バッチ処理完了: {len(all_embeddings)}個の埋め込みベクトル生成")
     return all_embeddings, all_valid_indices
 
-def get_embedding_auraface(file_path, use_detection=True):
-    """AuraFaceモデルで埋め込みベクトルを取得"""
-    if auraface_session is None:
+def get_embedding_japanese_face_v1(file_path, use_detection=True):
+    """JAPANESE_FACE_v1モデルで埋め込みベクトルを取得"""
+    if japanese_face_v1_session is None:
         return {
             'embedding': None,
-            'error': 'AuraFaceモデルが読み込まれていません',
+            'error': 'JAPANESE_FACE_v1モデルが読み込まれていません',
             'processing_time': 0
         }
     
@@ -710,8 +710,8 @@ def get_embedding_auraface(file_path, use_detection=True):
         face_aligned = np.transpose(face_aligned, (2, 0, 1))  # HWC -> CHW
         face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
         
-        # AuraFaceで埋め込みベクトル計算
-        recognition_session = auraface_session['recognition_session']
+        # JAPANESE_FACE_v1で埋め込みベクトル計算
+        recognition_session = japanese_face_v1_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
         outputs = recognition_session.run(None, {input_name: face_aligned})
         embedding = outputs[0][0]
@@ -736,7 +736,7 @@ def get_embedding_auraface(file_path, use_detection=True):
 
 def get_embedding_single(file_path, use_detection=True):
     """単一ファイル処理（バッチ処理なし）"""
-    if auraface_session is None:
+    if japanese_face_v1_session is None:
         return None
     
     try:
@@ -759,8 +759,8 @@ def get_embedding_single(file_path, use_detection=True):
         face_aligned = np.transpose(face_aligned, (2, 0, 1))  # HWC -> CHW
         face_aligned = np.expand_dims(face_aligned, axis=0)  # バッチ次元追加
         
-        # AuraFaceで埋め込みベクトル計算
-        recognition_session = auraface_session['recognition_session']
+        # JAPANESE_FACE_v1で埋め込みベクトル計算
+        recognition_session = japanese_face_v1_session['recognition_session']
         input_name = MODEL_CONFIG["input_name"]
         outputs = recognition_session.run(None, {input_name: face_aligned})
         embedding = outputs[0][0]
@@ -818,11 +818,11 @@ def ensemble_verification(embeddings1, embeddings2):
     
     return results
 
-def compare_auraface_faces(file_path1, file_path2):
-    """AuraFaceモデルで2つの顔を比較"""
+def compare_japanese_face_v1_faces(file_path1, file_path2):
+    """JAPANESE_FACE_v1モデルで2つの顔を比較"""
     # 各画像の埋め込みベクトルを取得
-    embedding1 = get_embedding_auraface(file_path1, use_detection=True)
-    embedding2 = get_embedding_auraface(file_path2, use_detection=True)
+    embedding1 = get_embedding_japanese_face_v1(file_path1, use_detection=True)
+    embedding2 = get_embedding_japanese_face_v1(file_path2, use_detection=True)
     
     if (embedding1['embedding'] is not None and 
         embedding2['embedding'] is not None):
@@ -991,26 +991,26 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
     file2.file.seek(0)
     deepface_results = verify_faces(file1.file, file2.file)
     
-    # AuraFace顔認識処理
-    auraface_comparison = compare_auraface_faces(filename1, filename2)
+    # JAPANESE_FACE_v1顔認識処理
+    japanese_face_v1_comparison = compare_japanese_face_v1_faces(filename1, filename2)
     
-    # AuraFace埋め込みベクトル取得
-    emb1_auraface = get_embedding_auraface(filename1, use_detection=True)
-    emb2_auraface = get_embedding_auraface(filename2, use_detection=True)
+    # JAPANESE_FACE_v1埋め込みベクトル取得
+    emb1_japanese_face_v1 = get_embedding_japanese_face_v1(filename1, use_detection=True)
+    emb2_japanese_face_v1 = get_embedding_japanese_face_v1(filename2, use_detection=True)
     
-    if (emb1_auraface['embedding'] is not None and 
-        emb2_auraface['embedding'] is not None):
+    if (emb1_japanese_face_v1['embedding'] is not None and 
+        emb2_japanese_face_v1['embedding'] is not None):
         # アンサンブル検証を使用
         ensemble_results = ensemble_verification(
-            emb1_auraface['embedding'], 
-            emb2_auraface['embedding']
+            emb1_japanese_face_v1['embedding'], 
+            emb2_japanese_face_v1['embedding']
         )
-        similarity_auraface = ensemble_results['cosine_similarity']
-        is_same_auraface = ensemble_results['is_same_adaptive']
+        similarity_japanese_face_v1 = ensemble_results['cosine_similarity']
+        is_same_japanese_face_v1 = ensemble_results['is_same_adaptive']
         confidence_score = ensemble_results['confidence_score']
     else:
-        similarity_auraface = 0.0
-        is_same_auraface = False
+        similarity_japanese_face_v1 = 0.0
+        is_same_japanese_face_v1 = False
         confidence_score = 0.0
         ensemble_results = {
             'cosine_similarity': 0.0,
@@ -1021,13 +1021,13 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             'confidence_score': 0.0
         }
     
-    # AuraFace埋め込みベクトルの詳細情報
-    auraface_embedding_info = {
-        'emb1': emb1_auraface['embedding'].tolist()[:20] if emb1_auraface['embedding'] is not None else [],
-        'emb2': emb2_auraface['embedding'].tolist()[:20] if emb2_auraface['embedding'] is not None else [],
+    # JAPANESE_FACE_v1埋め込みベクトルの詳細情報
+    japanese_face_v1_embedding_info = {
+        'emb1': emb1_japanese_face_v1['embedding'].tolist()[:20] if emb1_japanese_face_v1['embedding'] is not None else [],
+        'emb2': emb2_japanese_face_v1['embedding'].tolist()[:20] if emb2_japanese_face_v1['embedding'] is not None else [],
         'embedding_dims': MODEL_CONFIG['embedding_size'],
-        'emb1_norm': float(np.linalg.norm(emb1_auraface['embedding'])) if emb1_auraface['embedding'] is not None else 0.0,
-        'emb2_norm': float(np.linalg.norm(emb2_auraface['embedding'])) if emb2_auraface['embedding'] is not None else 0.0
+        'emb1_norm': float(np.linalg.norm(emb1_japanese_face_v1['embedding'])) if emb1_japanese_face_v1['embedding'] is not None else 0.0,
+        'emb2_norm': float(np.linalg.norm(emb2_japanese_face_v1['embedding'])) if emb2_japanese_face_v1['embedding'] is not None else 0.0
     }
     
     result = {
@@ -1046,23 +1046,23 @@ def verify(request: Request, file1: UploadFile = File(...), file2: UploadFile = 
             },
             "embeddings": deepface_results['arcface']['embeddings']
         },
-        "auraface": {
-            "similarity": f"{similarity_auraface:.4f}",
-            "is_same": is_same_auraface,
+        "japanese_face_v1": {
+            "similarity": f"{similarity_japanese_face_v1:.4f}",
+            "is_same": is_same_japanese_face_v1,
             "adaptive_threshold": f"{ensemble_results.get('adaptive_threshold', 0.5):.4f}",
             "confidence_score": f"{confidence_score:.4f}",
             "euclidean_distance": f"{ensemble_results.get('euclidean_distance', 0.0):.4f}",
             "l1_distance": f"{ensemble_results.get('l1_distance', 0.0):.4f}",
             "normalized_euclidean": f"{ensemble_results.get('normalized_euclidean', 0.0):.4f}",
-            "embeddings": auraface_embedding_info,
-            "processing_time": f"{emb1_auraface.get('processing_time', 0) + emb2_auraface.get('processing_time', 0):.1f}ms"
+            "embeddings": japanese_face_v1_embedding_info,
+            "processing_time": f"{emb1_japanese_face_v1.get('processing_time', 0) + emb2_japanese_face_v1.get('processing_time', 0):.1f}ms"
         },
         "img1_path": "/" + filename1,
         "img2_path": "/" + filename2,
-        "auraface_comparison": auraface_comparison,
+        "japanese_face_v1_comparison": japanese_face_v1_comparison,
         "model_info": {
             "deepface_arcface": "ArcFace (DeepFace implementation)",
-            "auraface": MODEL_CONFIG['name'],
+            "japanese_face_v1": MODEL_CONFIG['name'],
             "description": MODEL_CONFIG['description']
         }
     }
@@ -1274,8 +1274,8 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     print(f"クエリ画像保存完了: {query_filename}")
     
-    # AuraFaceモデルでクエリ画像の埋め込みベクトルを取得
-    query_embedding = get_embedding_auraface(query_filename, use_detection=True)
+    # JAPANESE_FACE_v1モデルでクエリ画像の埋め込みベクトルを取得
+    query_embedding = get_embedding_japanese_face_v1(query_filename, use_detection=True)
     
     # ファイル保存処理を実行
     file_info_list = await _save_files_individually(folder_images)
@@ -1305,7 +1305,7 @@ async def _process_folder_comparison(query_image, folder_images, start_time, is_
     
     # シンプルな順次処理を実行
     print(f"🔄 順次処理開始: {total_files}ファイル")
-    results = await _execute_comparison_auraface(query_embedding, valid_file_info_list, batch_size, start_time)
+    results = await _execute_comparison_japanese_face_v1(query_embedding, valid_file_info_list, batch_size, start_time)
     
     # 結果の整理と返却
     return _format_comparison_results(results, query_image, total_files, valid_file_info_list, start_time, is_chunk)
@@ -1388,11 +1388,11 @@ async def _execute_chunked_comparison(query_embeddings, valid_file_info_list, se
     print(f"🎉 段階的処理完了: 全{total_chunks}チャンク, {total_files}ファイル処理済み")
     return all_results
 
-async def _execute_comparison_auraface(query_embedding, valid_file_info_list, batch_size, start_time):
-    """AuraFaceモデルによるバッチ処理比較"""
+async def _execute_comparison_japanese_face_v1(query_embedding, valid_file_info_list, batch_size, start_time):
+    """JAPANESE_FACE_v1モデルによるバッチ処理比較"""
     total_files = len(valid_file_info_list)
     
-    print(f"🚀 AuraFace バッチ処理比較開始: {total_files}ファイル")
+    print(f"🚀 JAPANESE_FACE_v1 バッチ処理比較開始: {total_files}ファイル")
     
     # バッチ処理でターゲット画像の埋め込みベクトルを一括取得
     target_file_paths = [file_info['filename'] for file_info in valid_file_info_list]
@@ -1436,7 +1436,7 @@ async def _execute_comparison_auraface(query_embedding, valid_file_info_list, ba
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'auraface': {
+                    'japanese_face_v1': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1480,7 +1480,7 @@ async def _execute_comparison_auraface(query_embedding, valid_file_info_list, ba
                 'error': 'バッチ処理でスキップ'
             })
     
-    print(f"✅ AuraFace バッチ処理完了: {len(results)}件の結果")
+    print(f"✅ JAPANESE_FACE_v1 バッチ処理完了: {len(results)}件の結果")
     
     # 類似度の高い順にソート
     results.sort(key=lambda x: x['best_similarity'], reverse=True)
@@ -1544,7 +1544,7 @@ async def _execute_comparison_no_batch(query_embedding, valid_file_info_list, st
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'auraface': {
+                    'japanese_face_v1': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1640,7 +1640,7 @@ async def _execute_comparison(query_embeddings, valid_file_info_list, selected_m
                 'best_similarity': similarity_score,
                 'best_model': MODEL_CONFIG['name'],
                 'model_results': {
-                    'auraface': {
+                    'japanese_face_v1': {
                         'model_name': MODEL_CONFIG['name'],
                         'similarity': similarity_score,
                         'confidence': min(similarity_score * 1.2, 1.0),
@@ -1745,7 +1745,7 @@ async def compare_folder_benchmark(
             shutil.copyfileobj(query_image.file, buffer)
         
         # クエリ画像の埋め込みベクトルを取得
-        query_embedding = get_embedding_auraface(query_filename, use_detection=True)
+        query_embedding = get_embedding_japanese_face_v1(query_filename, use_detection=True)
         
         # ファイル保存処理
         file_info_list = await _save_files_individually(folder_images)
@@ -1758,7 +1758,7 @@ async def compare_folder_benchmark(
             # バッチ処理版
             optimal_batch_size = calculate_optimal_batch_size(len(valid_file_info_list))
             print(f"🚀 バッチ処理モード実行 (最適バッチサイズ: {optimal_batch_size})")
-            results = await _execute_comparison_auraface(query_embedding, valid_file_info_list, optimal_batch_size, comparison_start_time)
+            results = await _execute_comparison_japanese_face_v1(query_embedding, valid_file_info_list, optimal_batch_size, comparison_start_time)
         else:
             # 非バッチ処理版
             print(f"🐌 非バッチ処理モード実行 (1ファイルずつ順次処理)")

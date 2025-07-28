@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buffalo_l vs JAPANESE_FACE_v1 モデル比較</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .upload-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .upload-section h2 {
+            color: #444;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #667eea;
+            border-radius: 5px;
+            background: #f8f9ff;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: transform 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            border: 2px solid #667eea;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .comparison-table th,
+        .comparison-table td {
+            padding: 15px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        .comparison-table th {
+            background: #667eea;
+            color: white;
+        }
+        .comparison-table tr:nth-child(even) {
+            background: #f8f9ff;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .model-result {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .model-result.buffalo {
+            border-left: 4px solid #4CAF50;
+        }
+        .model-result.japanese_face_v1 {
+            border-left: 4px solid #FF9800;
+        }
+        .similarity-score {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .similarity-score.match {
+            color: #4CAF50;
+        }
+        .similarity-score.no-match {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🆚 Buffalo_l vs JAPANESE_FACE_v1 モデル比較</h1>
+        
+        <div class="upload-section">
+            <h2>📋 画像アップロード</h2>
+            
+            <!-- 比較タイプ選択 -->
+            <div class="form-group">
+                <label>比較タイプ:</label>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="comparison_type" value="1vs1" checked>
+                        🔄 1対1比較
+                    </label>
+                    <label>
+                        <input type="radio" name="comparison_type" value="1vsN">
+                        🔍 1対N比較
+                    </label>
+                </div>
+            </div>
+            
+            <!-- 1対1比較フォーム -->
+            <form id="comparison1vs1Form" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="file1">画像1:</label>
+                    <input type="file" id="file1" name="file1" accept="image/*" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="file2">画像2:</label>
+                    <input type="file" id="file2" name="file2" accept="image/*" required>
+                </div>
+                
+                <button type="submit" id="compare1vs1Btn">1対1比較実行</button>
+            </form>
+            
+            <!-- 1対N比較フォーム -->
+            <form id="comparison1vsNForm" enctype="multipart/form-data" style="display: none;">
+                <div class="form-group">
+                    <label for="queryImage">クエリ画像（検索対象）:</label>
+                    <input type="file" id="queryImage" name="query_image" accept="image/*" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="folderImages">フォルダ画像（複数選択）:</label>
+                    <input type="file" id="folderImages" name="folder_images" accept="image/*" multiple required>
+                    <small style="color: #666;">複数の画像を選択してください（Ctrl+クリック または Cmd+クリック）</small>
+                </div>
+                
+                <button type="submit" id="compare1vsNBtn">1対N比較実行</button>
+            </form>
+        </div>
+        
+        <div class="upload-section">
+            <h2>📊 比較結果</h2>
+            <div id="status" class="status" style="display: none;"></div>
+            <div id="results" class="results" style="display: none;">
+                <div id="comparisonData"></div>
+            </div>
+        </div>
+        
+        <div class="upload-section">
+            <h2>📝 比較について</h2>
+            <ul style="color: #555; line-height: 1.6;">
+                <li><strong>Buffalo_l:</strong> WebFace600K（60万人・600万枚）で訓練されたInsightFaceモデル</li>
+                <li><strong>JAPANESE_FACE_v1:</strong> 商用利用可能なArcFace実装（Apache 2.0ライセンス）</li>
+                <li><strong>類似度:</strong> コサイン類似度で計算（-1.0〜1.0、高いほど類似）</li>
+                <li><strong>処理時間:</strong> 推論にかかった時間をミリ秒で表示</li>
+                <li><strong>判定:</strong> 各モデルの閾値に基づいて同一人物かどうかを判定</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const form1vs1 = document.getElementById('comparison1vs1Form');
+        const form1vsN = document.getElementById('comparison1vsNForm');
+        const statusDiv = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+        const compare1vs1Btn = document.getElementById('compare1vs1Btn');
+        const compare1vsNBtn = document.getElementById('compare1vsNBtn');
+
+        // 比較タイプ切り替え
+        document.querySelectorAll('input[name="comparison_type"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (e.target.value === '1vs1') {
+                    form1vs1.style.display = 'block';
+                    form1vsN.style.display = 'none';
+                } else {
+                    form1vs1.style.display = 'none';
+                    form1vsN.style.display = 'block';
+                }
+            });
+        });
+
+        // 1対1比較
+        form1vs1.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form1vs1);
+            
+            // UI状態更新
+            compare1vs1Btn.disabled = true;
+            showStatus('loading', '1対1モデル比較実行中...');
+            resultsDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/compare_models', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showStatus('success', '1対1モデル比較完了!');
+                    displayResults1vs1(data);
+                } else {
+                    throw new Error(data.error || '1対1モデル比較に失敗しました');
+                }
+                
+            } catch (error) {
+                console.error('1対1比較エラー:', error);
+                showStatus('error', `エラー: ${error.message}`);
+            } finally {
+                compare1vs1Btn.disabled = false;
+            }
+        });
+
+        // 1対N比較
+        form1vsN.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form1vsN);
+            const folderImages = document.getElementById('folderImages').files;
+            
+            // ファイル数チェック
+            if (folderImages.length === 0) {
+                showStatus('error', 'フォルダ画像を選択してください');
+                return;
+            }
+            
+            // UI状態更新
+            compare1vsNBtn.disabled = true;
+            showStatus('loading', `1対N比較実行中... (${folderImages.length}ファイル)`);
+            resultsDiv.style.display = 'none';
+            
+            try {
+                const response = await fetch('/compare_models_folder', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showStatus('success', `1対N比較完了! (${folderImages.length}ファイル処理)`);
+                    displayResults1vsN(data);
+                } else {
+                    throw new Error(data.error || '1対N比較に失敗しました');
+                }
+                
+            } catch (error) {
+                console.error('1対N比較エラー:', error);
+                showStatus('error', `エラー: ${error.message}`);
+            } finally {
+                compare1vsNBtn.disabled = false;
+            }
+        });
+
+        function showStatus(type, message) {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+
+        function displayResults1vs1(data) {
+            const results = data.comparison_results;
+            
+            let html = `
+                <h3>🔍 1対1比較結果: ${data.file1_name} vs ${data.file2_name}</h3>
+                <table class="comparison-table">
+                    <tr>
+                        <th>モデル</th>
+                        <th>類似度</th>
+                        <th>判定</th>
+                        <th>処理時間</th>
+                        <th>閾値</th>
+                        <th>ステータス</th>
+                    </tr>
+            `;
+            
+            // Buffalo_l結果
+            if (results.buffalo_l && results.buffalo_l.available) {
+                const buffalo = results.buffalo_l;
+                html += `
+                    <tr>
+                        <td><strong>🐃 ${buffalo.model_name}</strong></td>
+                        <td><span class="similarity-score ${buffalo.is_same ? 'match' : 'no-match'}">${(buffalo.similarity * 100).toFixed(2)}%</span></td>
+                        <td>${buffalo.is_same ? '✅ 同一人物' : '❌ 別人'}</td>
+                        <td>${buffalo.processing_time_ms.toFixed(1)}ms</td>
+                        <td>${(buffalo.threshold * 100).toFixed(1)}%</td>
+                        <td>✅ 利用可能</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td><strong>🐃 Buffalo_l</strong></td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>❌ 利用不可</td>
+                    </tr>
+                `;
+            }
+            
+            // JAPANESE_FACE_v1結果
+            if (results.japanese_face_v1 && results.japanese_face_v1.available) {
+                const japanese_face_v1 = results.japanese_face_v1;
+                html += `
+                    <tr>
+                        <td><strong>🌟 ${japanese_face_v1.model_name}</strong></td>
+                        <td><span class="similarity-score ${japanese_face_v1.is_same ? 'match' : 'no-match'}">${(japanese_face_v1.similarity * 100).toFixed(2)}%</span></td>
+                        <td>${japanese_face_v1.is_same ? '✅ 同一人物' : '❌ 別人'}</td>
+                        <td>${japanese_face_v1.processing_time_ms.toFixed(1)}ms</td>
+                        <td>${(japanese_face_v1.threshold * 100).toFixed(1)}%</td>
+                        <td>✅ 利用可能</td>
+                    </tr>
+                `;
+            } else {
+                html += `
+                    <tr>
+                        <td><strong>🌟 JAPANESE_FACE_v1</strong></td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>❌ ${results.japanese_face_v1 ? results.japanese_face_v1.error : '利用不可'}</td>
+                    </tr>
+                `;
+            }
+            
+            html += '</table>';
+            
+            // 詳細情報
+            if (results.japanese_face_v1 && results.japanese_face_v1.available && results.japanese_face_v1.confidence1) {
+                html += `
+                    <h4>📊 JAPANESE_FACE_v1 詳細情報</h4>
+                    <p><strong>画像1 検出信頼度:</strong> ${(results.japanese_face_v1.confidence1 * 100).toFixed(1)}%</p>
+                    <p><strong>画像2 検出信頼度:</strong> ${(results.japanese_face_v1.confidence2 * 100).toFixed(1)}%</p>
+                `;
+            }
+            
+            document.getElementById('comparisonData').innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+
+        function displayResults1vsN(data) {
+            console.log('1対N比較結果:', data);
+            
+            let html = `
+                <h3>🔍 1対N比較結果: ${data.query_image}</h3>
+                <div style="margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px;">
+                    <p><strong>クエリ画像:</strong> ${data.query_image}</p>
+                    <p><strong>比較した画像数:</strong> ${data.total_comparisons || 0}</p>
+                    <p><strong>マッチした画像:</strong> ${data.matches_found || 0}</p>
+                </div>
+                
+                <h4>🏆 Buffalo_l vs JAPANESE_FACE_v1 結果比較</h4>
+                <table class="comparison-table">
+                    <tr>
+                        <th>項目</th>
+                        <th>🐃 Buffalo_l</th>
+                        <th>🌟 JAPANESE_FACE_v1</th>
+                    </tr>
+                    <tr>
+                        <td>ステータス</td>
+                        <td>${data.buffalo_l && data.buffalo_l.available ? '✅ 利用可能' : '❌ 利用不可'}</td>
+                        <td>${data.japanese_face_v1 && data.japanese_face_v1.available ? '✅ 利用可能' : '❌ 利用不可'}</td>
+                    </tr>
+                    <tr>
+                        <td>処理時間</td>
+                        <td>${data.buffalo_l && data.buffalo_l.processing_time_ms ? (data.buffalo_l.processing_time_ms / 1000).toFixed(2) + '秒' : '-'}</td>
+                        <td>${data.japanese_face_v1 && data.japanese_face_v1.processing_time_ms ? (data.japanese_face_v1.processing_time_ms / 1000).toFixed(2) + '秒' : '-'}</td>
+                    </tr>
+                    <tr>
+                        <td>マッチ数</td>
+                        <td>${data.buffalo_l && data.buffalo_l.matches ? data.buffalo_l.matches.length : 0}</td>
+                        <td>${data.japanese_face_v1 && data.japanese_face_v1.matches ? data.japanese_face_v1.matches.length : 0}</td>
+                    </tr>
+                </table>
+            `;
+
+            // Buffalo_l結果表示
+            if (data.buffalo_l && data.buffalo_l.available && data.buffalo_l.matches) {
+                html += `
+                    <h4>🐃 Buffalo_l マッチ結果 (上位10件)</h4>
+                    <table class="comparison-table">
+                        <tr>
+                            <th>順位</th>
+                            <th>ファイル名</th>
+                            <th>類似度</th>
+                            <th>判定</th>
+                        </tr>
+                `;
+                
+                data.buffalo_l.matches.slice(0, 10).forEach((match, index) => {
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${match.filename || 'N/A'}</td>
+                            <td><span class="similarity-score ${match.is_match ? 'match' : 'no-match'}">${(match.similarity * 100).toFixed(1)}%</span></td>
+                            <td>${match.is_match ? '✅ マッチ' : '❌ 非マッチ'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</table>';
+            }
+
+            // JAPANESE_FACE_v1結果表示
+            if (data.japanese_face_v1 && data.japanese_face_v1.available && data.japanese_face_v1.matches) {
+                html += `
+                    <h4>🌟 JAPANESE_FACE_v1 マッチ結果 (上位10件)</h4>
+                    <table class="comparison-table">
+                        <tr>
+                            <th>順位</th>
+                            <th>ファイル名</th>
+                            <th>類似度</th>
+                            <th>判定</th>
+                        </tr>
+                `;
+                
+                data.japanese_face_v1.matches.slice(0, 10).forEach((match, index) => {
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${match.filename || 'N/A'}</td>
+                            <td><span class="similarity-score ${match.is_match ? 'match' : 'no-match'}">${(match.similarity * 100).toFixed(1)}%</span></td>
+                            <td>${match.is_match ? '✅ マッチ' : '❌ 非マッチ'}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</table>';
+            }
+
+            // エラー情報表示
+            if (data.buffalo_l && !data.buffalo_l.available) {
+                html += `<div class="status error">Buffalo_l エラー: ${data.buffalo_l.error || '不明なエラー'}</div>`;
+            }
+            if (data.japanese_face_v1 && !data.japanese_face_v1.available) {
+                html += `<div class="status error">JAPANESE_FACE_v1 エラー: ${data.japanese_face_v1.error || '不明なエラー'}</div>`;
+            }
+            
+            document.getElementById('comparisonData').innerHTML = html;
+            resultsDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

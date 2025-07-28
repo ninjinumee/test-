@@ -8,4 +8,8 @@ opencv-python
 pillow
 python-multipart
 jinja2
-mediapipe 
+mediapipe
+insightface
+dlib
+cmake
+face_recognition 
