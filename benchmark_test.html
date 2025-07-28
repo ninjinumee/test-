@@ -326,6 +326,13 @@
         }
 
         function displayResults(data, frontendTimeMs) {
+            console.log('Received data:', data); // デバッグ用ログ
+            
+            if (!data) {
+                console.error('データが空です');
+                return;
+            }
+            
             const metrics = data.performance_metrics;
             
             // パフォーマンス指標表示
@@ -390,17 +397,22 @@
             
             // 上位マッチ表示
             const topMatches = document.getElementById('topMatches');
-            if (data.top_matches && data.top_matches.length > 0) {
+            console.log('Top matches data:', data.top_matches); // デバッグ用ログ
+            
+            if (data.top_matches && Array.isArray(data.top_matches) && data.top_matches.length > 0) {
                 let matchesHtml = '<table class="comparison-table"><tr><th>順位</th><th>ファイル名</th><th>類似度</th><th>マッチ</th></tr>';
                 data.top_matches.forEach((match, index) => {
-                    matchesHtml += `
-                        <tr>
-                            <td>${index + 1}</td>
-                            <td>${match.original_filename}</td>
-                            <td>${(match.best_similarity * 100).toFixed(1)}%</td>
-                            <td>${match.is_match ? '✅' : '❌'}</td>
-                        </tr>
-                    `;
+                    console.log(`Processing match ${index}:`, match); // デバッグ用ログ
+                    if (match && typeof match === 'object') {
+                        matchesHtml += `
+                            <tr>
+                                <td>${index + 1}</td>
+                                <td>${match.original_filename || 'N/A'}</td>
+                                <td>${match.best_similarity ? (match.best_similarity * 100).toFixed(1) : '0.0'}%</td>
+                                <td>${match.is_match ? '✅' : '❌'}</td>
+                            </tr>
+                        `;
+                    }
                 });
                 matchesHtml += '</table>';
                 topMatches.innerHTML = matchesHtml;

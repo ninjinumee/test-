@@ -304,7 +304,7 @@
                         <p><strong>成功した比較:</strong> ${data.successful_comparisons.toLocaleString()}</p>
                         <p><strong>マッチした画像:</strong> ${data.matches_found.toLocaleString()}</p>
                         <p><strong>使用閾値:</strong> ${data.processing_summary.threshold_used}</p>
-                        <p><strong>使用モデル:</strong> ${data.processing_summary.available_models.map(key => data.processing_summary.model_descriptions[key] || key).join(', ')}</p>
+                        <p><strong>使用モデル:</strong> ${data.processing_summary.model || 'Buffalo_l WebFace600K ResNet50'}</p>
                         ${data.total_results > 0 ? `<p><strong>表示結果:</strong> 全 ${data.total_results.toLocaleString()} 件表示</p>` : ''}
                         ${data.processing_summary.total_processing_time ? `<p><strong>総処理時間:</strong> ${(data.processing_summary.total_processing_time / 1000).toFixed(1)} 秒</p>` : ''}
                         ${data.processing_summary.files_per_second ? `<p><strong>処理速度:</strong> ${data.processing_summary.files_per_second.toFixed(1)} ファイル/秒</p>` : ''}
@@ -340,14 +340,14 @@
                             <details style="margin-top: 10px;">
                                 <summary>詳細結果</summary>
                                 <div style="margin-top: 10px;">
-                                    ${Object.entries(result.model_results).map(([model_key, model_result]) => `
+                                    ${result.model_results ? Object.entries(result.model_results).map(([model_key, model_result]) => `
                                         <div style="margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
                                             <strong>${model_result.model_name}:</strong><br>
                                             類似度: ${(model_result.similarity * 100).toFixed(1)}%<br>
                                             信頼度: ${(model_result.confidence * 100).toFixed(1)}%<br>
                                             判定: ${model_result.is_same ? '同一人物' : '別人'}
                                         </div>
-                                    `).join('')}
+                                    `).join('') : '<p>詳細情報がありません</p>'}
                                 </div>
                             </details>
                         </div>

@@ -1623,14 +1623,23 @@ async def compare_folder_benchmark(
         # 速度統計の計算
         files_per_second = len(valid_file_info_list) / comparison_time if comparison_time > 0 else 0
         
+        # 結果のデバッグ情報
+        print(f"🔍 デバッグ: results型={type(results)}, 長さ={len(results) if results else 'None'}")
+        if results:
+            print(f"🔍 デバッグ: 最初の結果={results[0] if len(results) > 0 else 'Empty'}")
+        
+        # top_matchesのデバッグ
+        top_matches = results[:10] if results else []
+        print(f"🔍 デバッグ: top_matches型={type(top_matches)}, 長さ={len(top_matches)}")
+        
         return JSONResponse(content={
             'benchmark_mode': 'batch' if use_batch else 'no_batch',
             'query_image': query_image.filename,
             'total_files': total_files,
             'processed_files': len(valid_file_info_list),
-            'matches_found': len([r for r in results if r['is_match']]),
-            'results': results[:100],  # 上位100件のみ表示
-            'total_results': len(results),
+            'matches_found': len([r for r in results if r['is_match']]) if results else 0,
+            'results': results[:100] if results else [],  # 上位100件のみ表示
+            'total_results': len(results) if results else 0,
             'performance_metrics': {
                 'preprocessing_time_ms': preprocessing_time * 1000,
                 'comparison_time_ms': comparison_time * 1000,
@@ -1640,7 +1649,7 @@ async def compare_folder_benchmark(
                 'processing_method': 'バッチ処理' if use_batch else '順次処理（非バッチ）',
                 'efficiency_score': files_per_second * len(valid_file_info_list)  # 総合効率スコア
             },
-            'top_matches': results[:10] if results else []
+            'top_matches': top_matches
         })
         
     except Exception as e:
