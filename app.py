@@ -273,9 +273,9 @@ try:
         allowed_modules=['detection'],
         name='buffalo_l'
     )
-    # det_sizeは112x112に設定
-    buffalo_l_app.prepare(ctx_id=0, det_size=(112, 112))
-    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=112x112)")
+    # det_sizeを最適設定に変更（320x320）
+    buffalo_l_app.prepare(ctx_id=0, det_size=(320, 320))
+    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=320x320)")
     BUFFALO_L_AVAILABLE = True
 except Exception as e:
     print(f"⚠️ Buffalo_l顔検出モデル初期化失敗: {e}")
@@ -313,12 +313,35 @@ def detect_and_align_buffalo_l(image):
         if len(faces) == 0:
             return None
         
-        # 最も大きい顔を選択
-        best_face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
+        # 最も大きい顔を選択（安全な方法）
+        best_face = None
+        max_area = 0
+        for face in faces:
+            try:
+                bbox = face.bbox
+                if len(bbox) >= 4:
+                    area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    if area > max_area:
+                        max_area = area
+                        best_face = face
+            except Exception as e:
+                print(f"⚠️ 顔選択でエラー: {e}")
+                continue
+        
+        if best_face is None:
+            print("❌ 有効な顔が見つかりません")
+            return None
         
         # バウンディングボックスを取得
-        bbox = best_face.bbox.astype(int)
-        x1, y1, x2, y2 = bbox
+        bbox = best_face.bbox
+        
+        # bbox形状チェック
+        if len(bbox) < 4:
+            print(f"❌ 無効なbbox形状: {bbox.shape}, 最低4つの値が必要")
+            return None
+        
+        bbox = bbox.astype(int)
+        x1, y1, x2, y2 = bbox[:4]  # 最初の4つの値のみ使用
         
         # マージンを追加
         margin = 0.2
