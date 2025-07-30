@@ -389,15 +389,10 @@ def detect_and_align_buffalo_l(image, save_crop=False, original_filename=None):
                 base_name = os.path.splitext(os.path.basename(original_filename))[0]
                 crop_filename = f"{crop_dir}/crop_{base_name}_{timestamp}.jpg"
                 
-                # 元の切り出し画像（リサイズ前）を保存
+                # 元の切り出し画像（リサイズ前）のみ保存
                 cv2.imwrite(crop_filename, face_crop)
                 
-                # リサイズ後の画像も保存
-                aligned_filename = f"{crop_dir}/aligned_{base_name}_{timestamp}.jpg"
-                cv2.imwrite(aligned_filename, aligned_face)
-                
                 print(f"💾 顔切り出し画像保存: {crop_filename}")
-                print(f"💾 アライメント画像保存: {aligned_filename}")
                 
             except Exception as e:
                 print(f"⚠️ 切り出し画像保存エラー: {e}")
