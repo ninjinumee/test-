@@ -295,8 +295,14 @@ def enhance_image_quality(image):
     return sharpened
 
 
-def detect_and_align_buffalo_l(image):
-    """Buffalo_l顔検出モデルによる顔検出とアライメント"""
+def detect_and_align_buffalo_l(image, save_crop=False, original_filename=None):
+    """Buffalo_l顔検出モデルによる顔検出とアライメント
+    
+    Args:
+        image: 入力画像 (OpenCV形式)
+        save_crop: 切り出し画像を保存するかどうか
+        original_filename: 元のファイル名（保存時のファイル名生成用）
+    """
     if not BUFFALO_L_AVAILABLE or buffalo_l_app is None:
         return None
     
@@ -370,6 +376,32 @@ def detect_and_align_buffalo_l(image):
         # 112x112にリサイズ
         aligned_face = cv2.resize(face_crop, (112, 112))
         
+        # 切り出し画像を保存（オプション）
+        if save_crop and original_filename:
+            try:
+                # 保存用ディレクトリを確保
+                crop_dir = "static/face_crops"
+                os.makedirs(crop_dir, exist_ok=True)
+                
+                # ファイル名生成（元ファイル名 + タイムスタンプ）
+                import time
+                timestamp = int(time.time() * 1000)  # ミリ秒タイムスタンプ
+                base_name = os.path.splitext(os.path.basename(original_filename))[0]
+                crop_filename = f"{crop_dir}/crop_{base_name}_{timestamp}.jpg"
+                
+                # 元の切り出し画像（リサイズ前）を保存
+                cv2.imwrite(crop_filename, face_crop)
+                
+                # リサイズ後の画像も保存
+                aligned_filename = f"{crop_dir}/aligned_{base_name}_{timestamp}.jpg"
+                cv2.imwrite(aligned_filename, aligned_face)
+                
+                print(f"💾 顔切り出し画像保存: {crop_filename}")
+                print(f"💾 アライメント画像保存: {aligned_filename}")
+                
+            except Exception as e:
+                print(f"⚠️ 切り出し画像保存エラー: {e}")
+        
         print(f"✅ Buffalo_l顔検出成功: 信頼度={best_face.det_score:.3f}, bbox=({x1},{y1},{x2-x1},{y2-y1})")
         return aligned_face
         
@@ -377,7 +409,7 @@ def detect_and_align_buffalo_l(image):
         print(f"❌ Buffalo_l顔検出エラー: {e}")
         return None
 
-def detect_and_align_face(image_path):
+def detect_and_align_face(image_path, save_crop=False):
     """Buffalo_l顔検出・アライメント処理"""
     image = cv2.imread(image_path)
     if image is None:
@@ -385,7 +417,11 @@ def detect_and_align_face(image_path):
     
     # Buffalo_lによる顔検出のみ実行
     if BUFFALO_L_AVAILABLE:
-        buffalo_result = detect_and_align_buffalo_l(image)
+        buffalo_result = detect_and_align_buffalo_l(
+            image, 
+            save_crop=save_crop, 
+            original_filename=image_path
+        )
         if buffalo_result is not None:
             return buffalo_result
         else:
@@ -395,13 +431,13 @@ def detect_and_align_face(image_path):
         print("❌ Buffalo_l顔検出モデルが利用できません")
         return None
 
-def preprocess_image_for_model(file_path, use_detection=True):
+def preprocess_image_for_model(file_path, use_detection=True, save_crop=False):
     """Buffalo_lモデル用の前処理"""
     input_size = MODEL_CONFIG["input_size"]
     
     if use_detection:
-        # 顔検出とクロップ
-        face_image = detect_and_align_face(file_path)
+        # 顔検出とクロップ（切り出し画像保存オプション付き）
+        face_image = detect_and_align_face(file_path, save_crop=save_crop)
         if face_image is None:
             return None
         
@@ -427,7 +463,7 @@ def preprocess_image_simple(file):
     img = np.expand_dims(img, axis=0)   # NCHW
     return img
 
-def preprocess_images_batch(file_paths, use_detection=True, batch_size=32):
+def preprocess_images_batch(file_paths, use_detection=True, batch_size=32, save_crop=False):
     """複数画像のバッチ前処理"""
     input_size = MODEL_CONFIG["input_size"]
     
@@ -437,8 +473,8 @@ def preprocess_images_batch(file_paths, use_detection=True, batch_size=32):
     for idx, file_path in enumerate(file_paths):
         try:
             if use_detection:
-                # 顔検出とクロップ
-                face_image = detect_and_align_face(file_path)
+                # 顔検出とクロップ（切り出し画像保存オプション付き）
+                face_image = detect_and_align_face(file_path, save_crop=save_crop)
                 if face_image is None:
                     continue
                 
@@ -524,17 +560,35 @@ def get_embedding_batch(file_paths, use_detection=True, batch_size=None):
         total_batches = (len(file_paths) + batch_size - 1) // batch_size
         
         try:
-            # バッチ前処理
+            # バッチ前処理（切り出し画像保存を有効化）
             batch_images, valid_indices = preprocess_images_batch(
-                batch_files, use_detection, batch_size
+                batch_files, use_detection, batch_size, save_crop=True
             )
             
             if batch_images is None:
                 print(f"⚠️ バッチ {batch_num}/{total_batches}: 処理可能な画像なし")
                 continue
             
-            # バッチ推論実行
-            embeddings = session.run(None, {input_name: batch_images})[0]
+            # Buffalo_lモデルはバッチサイズ1のみ対応のため、1枚ずつ推論
+            embeddings = []
+            for idx, single_image in enumerate(batch_images):
+                try:
+                    single_input = np.expand_dims(single_image, axis=0)  # (1, C, H, W)
+                    single_embedding = session.run(None, {input_name: single_input})[0]
+                    if single_embedding.shape[0] == 1:  # 期待される形状チェック
+                        embeddings.append(single_embedding[0])  # バッチ次元を除去
+                    else:
+                        print(f"⚠️ 予期しない埋め込み形状: {single_embedding.shape}")
+                        continue
+                except Exception as e:
+                    print(f"❌ 単一画像推論エラー [{idx}]: {e}")
+                    continue
+            
+            if not embeddings:
+                print(f"⚠️ バッチ {batch_num}/{total_batches}: 推論可能な画像なし")
+                continue
+                
+            embeddings = np.array(embeddings)
             
             # 正規化
             embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
