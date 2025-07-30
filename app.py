@@ -101,14 +101,13 @@ import uuid
 import shutil
 from fastapi.staticfiles import StaticFiles
 import cv2
-import mediapipe as mp
 import asyncio
 import json
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+# Removed unused imports: ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing
 import gc
 import time
-from functools import partial
+# Removed unused import: partial
 
 # Try to import psutil, fall back to basic monitoring if not available
 try:
@@ -263,10 +262,24 @@ buffalo_session = initialize_model()
 
 print("🐃 Buffalo_l WebFace600K モデル（InsightFace）を使用します")
 
-# MediaPipe face detection and landmarks
-mp_face_detection = mp.solutions.face_detection
-mp_face_mesh = mp.solutions.face_mesh
-mp_drawing = mp.solutions.drawing_utils
+# InsightFace/Buffalo_l顔検出モデルの初期化
+BUFFALO_L_AVAILABLE = False
+buffalo_l_app = None
+try:
+    from insightface.app import FaceAnalysis
+    # Buffalo_l顔検出モデルの初期化
+    buffalo_l_app = FaceAnalysis(
+        providers=['CPUExecutionProvider'],
+        allowed_modules=['detection'],
+        name='buffalo_l'
+    )
+    # det_sizeは112x112に設定
+    buffalo_l_app.prepare(ctx_id=0, det_size=(112, 112))
+    print("✅ Buffalo_l顔検出モデル初期化完了 (det_size=112x112)")
+    BUFFALO_L_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ Buffalo_l顔検出モデル初期化失敗: {e}")
+    BUFFALO_L_AVAILABLE = False
 
 def enhance_image_quality(image):
     """画像品質の向上処理"""
@@ -281,111 +294,83 @@ def enhance_image_quality(image):
     
     return sharpened
 
-def get_face_landmarks(image):
-    """顔のランドマークを取得"""
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
-    ) as face_mesh:
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
-        
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0]
-            h, w = image.shape[:2]
-            
-            # 重要なランドマーク（目、鼻、口の中心）を取得
-            left_eye = landmarks.landmark[33]  # 左目の中心
-            right_eye = landmarks.landmark[263]  # 右目の中心
-            nose_tip = landmarks.landmark[1]    # 鼻先
-            
-            # ピクセル座標に変換
-            left_eye_point = (int(left_eye.x * w), int(left_eye.y * h))
-            right_eye_point = (int(right_eye.x * w), int(right_eye.y * h))
-            nose_point = (int(nose_tip.x * w), int(nose_tip.y * h))
-            
-            return left_eye_point, right_eye_point, nose_point
-    
-    return None
 
-def align_face(image, landmarks):
-    """顔のアライメント（回転補正）"""
-    if landmarks is None:
-        return image
+def detect_and_align_buffalo_l(image):
+    """Buffalo_l顔検出モデルによる顔検出とアライメント"""
+    if not BUFFALO_L_AVAILABLE or buffalo_l_app is None:
+        return None
     
-    left_eye, right_eye, nose = landmarks
-    
-    # 目の角度を計算
-    eye_center = ((left_eye[0] + right_eye[0]) // 2, (left_eye[1] + right_eye[1]) // 2)
-    dy = right_eye[1] - left_eye[1]
-    dx = right_eye[0] - left_eye[0]
-    angle = np.degrees(np.arctan2(dy, dx))
-    
-    # 回転行列を作成
-    h, w = image.shape[:2]
-    rotation_matrix = cv2.getRotationMatrix2D(eye_center, angle, 1.0)
-    
-    # 画像を回転
-    aligned_image = cv2.warpAffine(image, rotation_matrix, (w, h), flags=cv2.INTER_CUBIC)
-    
-    return aligned_image
+    try:
+        # BGR -> RGB変換
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+            rgb_image = image
+        
+        # Buffalo_lで顔検出
+        faces = buffalo_l_app.get(rgb_image)
+        
+        if len(faces) == 0:
+            return None
+        
+        # 最も大きい顔を選択
+        best_face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
+        
+        # バウンディングボックスを取得
+        bbox = best_face.bbox.astype(int)
+        x1, y1, x2, y2 = bbox
+        
+        # マージンを追加
+        margin = 0.2
+        width = x2 - x1
+        height = y2 - y1
+        x1 = max(0, int(x1 - width * margin))
+        y1 = max(0, int(y1 - height * margin))
+        x2 = min(image.shape[1], int(x2 + width * margin))
+        y2 = min(image.shape[0], int(y2 + height * margin))
+        
+        # 正方形に調整
+        width = x2 - x1
+        height = y2 - y1
+        if width != height:
+            size = max(width, height)
+            center_x = x1 + width // 2
+            center_y = y1 + height // 2
+            x1 = max(0, center_x - size // 2)
+            y1 = max(0, center_y - size // 2)
+            x2 = min(image.shape[1], x1 + size)
+            y2 = min(image.shape[0], y1 + size)
+        
+        # 顔領域を切り出し
+        face_crop = image[y1:y2, x1:x2]
+        
+        # 112x112にリサイズ
+        aligned_face = cv2.resize(face_crop, (112, 112))
+        
+        print(f"✅ Buffalo_l顔検出成功: 信頼度={best_face.det_score:.3f}, bbox=({x1},{y1},{x2-x1},{y2-y1})")
+        return aligned_face
+        
+    except Exception as e:
+        print(f"❌ Buffalo_l顔検出エラー: {e}")
+        return None
 
 def detect_and_align_face(image_path):
-    """改善された顔検出・アライメント処理"""
+    """Buffalo_l顔検出・アライメント処理"""
     image = cv2.imread(image_path)
     if image is None:
         return None
     
-    # 画像品質の向上
-    enhanced_image = enhance_image_quality(image)
-    
-    # まず顔のランドマークを取得してアライメント
-    landmarks = get_face_landmarks(enhanced_image)
-    if landmarks:
-        aligned_image = align_face(enhanced_image, landmarks)
+    # Buffalo_lによる顔検出のみ実行
+    if BUFFALO_L_AVAILABLE:
+        buffalo_result = detect_and_align_buffalo_l(image)
+        if buffalo_result is not None:
+            return buffalo_result
+        else:
+            print("❌ Buffalo_l顔検出失敗")
+            return None
     else:
-        aligned_image = enhanced_image
-    
-    # 顔検出
-    with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.3) as face_detection:
-        rgb_image = cv2.cvtColor(aligned_image, cv2.COLOR_BGR2RGB)
-        results = face_detection.process(rgb_image)
-        
-        if results.detections:
-            # 最も信頼度の高い顔を選択
-            best_detection = max(results.detections, key=lambda x: x.score[0])
-            bbox = best_detection.location_data.relative_bounding_box
-            
-            h, w, _ = aligned_image.shape
-            x = int(bbox.xmin * w)
-            y = int(bbox.ymin * h)
-            width = int(bbox.width * w)
-            height = int(bbox.height * h)
-            
-            # より保守的なマージン設定
-            margin = 0.15
-            x = max(0, int(x - width * margin))
-            y = max(0, int(y - height * margin))
-            width = min(w - x, int(width * (1 + 2 * margin)))
-            height = min(h - y, int(height * (1 + 2 * margin)))
-            
-            # 正方形に近づける（ArcFaceモデルの期待する形状）
-            if width != height:
-                size = max(width, height)
-                center_x = x + width // 2
-                center_y = y + height // 2
-                x = max(0, center_x - size // 2)
-                y = max(0, center_y - size // 2)
-                x = min(w - size, x)
-                y = min(h - size, y)
-                width = height = min(size, w - x, h - y)
-            
-            face_image = aligned_image[y:y+height, x:x+width]
-            return face_image
-    
-    return aligned_image  # 顔が検出されない場合はアライメント済み画像を返す
+        print("❌ Buffalo_l顔検出モデルが利用できません")
+        return None
 
 def preprocess_image_for_model(file_path, use_detection=True):
     """Buffalo_lモデル用の前処理"""
